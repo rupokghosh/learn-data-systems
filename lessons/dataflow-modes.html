@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modes of dataflow · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch4.css">
+</head>
+<body data-lesson="dataflow-modes">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Modes of dataflow</h1>
+  </header>
+
+  <p>Encoding matters whenever data passes from one process to another that does not share its memory. Who encodes, who decodes, and how far apart they are in time decide which compatibility guarantees you need. There are three common ways for data to flow: through a database, through calls to a service, and through asynchronous messages. The same small task, a shop's checkout placing an order, looks very different in each.</p>
+
+  <figure class="widget" id="dataflow">
+    <p class="widget-title">One order, three ways</p>
+    <p class="widget-sub">Place the order, then break the network and place it again. Time runs downward.</p>
+    <div class="btn-row">
+      <button class="btn primary" type="button" id="df-play">Place order</button>
+      <label class="btn check"><input type="checkbox" id="df-fault"> Network drops after the first request</label>
+      <label class="btn check"><input type="checkbox" id="df-idem"> Idempotency key on requests</label>
+    </div>
+    <div class="df-grid"></div>
+    <figcaption>Blue arrows are messages; a dashed red arrow with a cross was lost. The shaded band is the link that is down. In the service-call column, the caller retries once after its timeout.</figcaption>
+  </figure>
+
+  <h2>Through databases</h2>
+  <p>A process that writes to a database encodes the data, and a process that reads it later decodes it. Sometimes the reader is a different service; sometimes it is the same service a year later, which makes a database write a message to your own future self. In the diagram, checkout never talks to fulfillment. It commits a row and is done. If fulfillment is unreachable for a while, the row waits, and nothing is lost.</p>
+  <p>The catch is that <strong>data outlives code</strong>. A deployment replaces all of your code within minutes, but rows written five years ago are still there in the encoding of their day, unless someone rewrote them. Rewriting a large table is expensive, so databases avoid it where they can. Adding a nullable column in PostgreSQL changes only the table's metadata: old rows are left alone, and the database fills in null when it reads them.<span class="sidenote">PostgreSQL 11 extended this to columns with a constant default, and MySQL 8.0 added an instant ADD COLUMN that also skips the rewrite.</span> The previous lesson showed the other hazard: an old version of the application reading a row written by a newer one and writing it back without the fields it did not know.</p>
+  <p>Archives are the exception. A nightly dump to a data lake can be encoded consistently with the latest schema, because it is written all at once, in a format like Avro or Parquet.</p>
+
+  <h2>Through services: REST and RPC</h2>
+  <p>When one process asks another to do something over the network, the responder is a service and the asker is its client. Web browsers, mobile apps, and other services are all clients. Two styles dominate. <strong>REST</strong> leans on HTTP itself: resources named by URLs, standard methods, status codes, caching headers, and usually JSON bodies. <strong>RPC</strong> frameworks, such as gRPC with Protocol Buffers or Thrift's own RPC layer, generate client stubs that let you call a remote method as if it were a local function.</p>
+  <p>That "as if" is the problem. A network call differs from a function call in ways that leak through any abstraction:</p>
+  <ul>
+    <li>A local call succeeds, fails, or throws. A remote call can also <strong>time out</strong>, and then you do not know whether the work was done. Turn on the network fault and watch the service-call column: the order was created, only the reply was lost.</li>
+    <li>So you <strong>retry</strong>, and a retry of a non-idempotent operation does it twice. Two orders, two charges.</li>
+    <li><strong>Latency</strong> varies wildly, from a fraction of a millisecond to seconds when the network is congested or the service is busy.</li>
+    <li>Arguments have to be <strong>encoded</strong>, so you cannot pass a pointer, and large objects cost real time. If client and server are in different languages, types like 64-bit integers and dates have to be translated, with all the hazards from the first lesson.</li>
+  </ul>
+  <p>The standard fix for retries is an <strong>idempotency key</strong>: the client generates a unique id for the operation and sends it with every attempt. The server records the key and the result in the same transaction as the work, and when the same key arrives again it returns the stored result instead of acting again. Turn the toggle on and replay the fault. Payment APIs commonly accept exactly this as an HTTP header:</p>
+
+<pre><code>POST /orders HTTP/1.1
+Idempotency-Key: 4c0b7e52-91d3-4f1a-b6e8-0d2a9f3c57e1
+Content-Type: application/json
+
+{"cart": 88, "total_cents": 4150}</code></pre>
+
+  <p>Services also have to evolve. You can usually upgrade servers before clients, so requests need backward compatibility (new servers accept old requests) and responses need forward compatibility (old clients tolerate new response fields). When a service is used by clients you do not control, such as a public API, you may have to keep old behaviour alive for years. Common approaches put a version in the URL (<code>/v2/orders</code>), in an HTTP header, or in the settings attached to each client's API key.</p>
+
+  <h2>Through message brokers</h2>
+  <p>Asynchronous messaging sits between the two. As with a service call, a message goes to another process with low delay. As with a database, it does not go directly: the sender hands it to a <strong>message broker</strong>, such as RabbitMQ, Apache Kafka, Amazon SQS, or NATS, which stores it and delivers it to one or more consumers.</p>
+  <p>The broker earns its place in several ways. It buffers messages when a consumer is slow or down, which is exactly what the third column shows: the message sits in the queue through the outage and is delivered when the worker returns. It redelivers messages to another consumer if one crashes. The sender does not need to know the address of any consumer, and one message can go to many consumers. In return, communication is one-way: the sender does not wait for, and usually does not get, a result.</p>
+  <p>Redelivery has a cost of its own. Most brokers guarantee at-least-once delivery, so if a worker processes a message and crashes before acknowledging it, the message arrives again. Consumers need the same idempotence as service handlers, typically by recording the ids of messages they have already applied. And a consumer that reads a message, transforms it, and republishes it to another topic must preserve unknown fields, for the same reason as the database case.</p>
+  <p><strong>Actor frameworks</strong> such as Akka, Microsoft Orleans, and Erlang/OTP apply the same idea inside a program: each actor holds private state and communicates only by asynchronous messages, whether the recipient is on the same machine or another one. Because a message may be lost even locally in that model, the gap between local and remote is smaller than it is for RPC. But a rolling upgrade still means actors on old and new code exchanging messages, so the message encoding needs the same forward and backward compatibility as everything else in this chapter.</p>
+
+  <p class="book-ref">In the book: Chapter 4, "Modes of Dataflow" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch4-dataflow.js"></script>
+</body>
+</html>

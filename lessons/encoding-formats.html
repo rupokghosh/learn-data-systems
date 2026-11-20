@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Formats for encoding data · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch4.css">
+</head>
+<body data-lesson="encoding-formats">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Formats for encoding data</h1>
+  </header>
+
+  <p>Every program works with data in two shapes. While it runs, data lives in objects, structs, hash maps, and arrays, laid out for the CPU and full of pointers. The moment that data has to leave the process, to be written to a file, stored in a database column, or sent over the network, it has to become a flat sequence of bytes that makes sense without the process that produced it. The translation from the first shape to the second is called <strong>encoding</strong> (or serialization, or marshalling), and the reverse is decoding.</p>
+
+  <p>The choice of encoding looks like a detail, but it decides how big your messages are, how fast they are to produce and parse, which languages can read them, and, most importantly for this chapter, whether old and new versions of your code can still understand each other.</p>
+
+  <h2>Pointers do not travel</h2>
+  <p>A pointer is an address in one process's memory. Send it to another machine and it points at nothing, or at something unrelated. So an encoder has to walk the object graph and write each value out in some agreed order, with enough framing (lengths, types, markers, delimiters) for the reader to find where one value ends and the next begins.</p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 210" role="img" aria-label="Left: an object in memory whose fields point to a string and to a list elsewhere in the heap. Right: the same data as one contiguous run of bytes, where nested values are written inline after a length.">
+      <defs><marker id="ef-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink-3)"/></marker></defs>
+      <text x="0" y="16" style="fill:var(--ink);font:600 14px var(--sans)">In memory</text>
+      <text x="0" y="34" style="fill:var(--ink-3);font-size:12px">Scattered across the heap, joined by addresses</text>
+      <g class="dg-node"><rect x="0" y="56" width="132" height="96" rx="6"/>
+        <text x="10" y="76" class="sub">Sighting @ 0x7f3a10</text>
+        <text x="10" y="98" style="font:12px var(--mono)">observer: ●</text>
+        <text x="10" y="118" style="font:12px var(--mono)">count: 37</text>
+        <text x="10" y="138" style="font:12px var(--mono)">species: ●</text></g>
+      <g class="dg-node"><rect x="186" y="50" width="104" height="34" rx="6"/><text x="196" y="72" style="font:12px var(--mono)">"Ilse Moreau"</text></g>
+      <g class="dg-node"><rect x="186" y="128" width="104" height="34" rx="6"/><text x="196" y="150" style="font:12px var(--mono)">[ ●, ● ]</text></g>
+      <g class="dg-node"><rect x="200" y="176" width="44" height="26" rx="5"/><text x="207" y="194" style="font:11px var(--mono)">heron</text></g>
+      <g class="dg-node"><rect x="252" y="176" width="38" height="26" rx="5"/><text x="259" y="194" style="font:11px var(--mono)">teal</text></g>
+      <g style="stroke:var(--ink-3);stroke-width:1.3;fill:none">
+        <path d="M100 94 C 150 94, 150 67, 184 67" marker-end="url(#ef-arr)"/>
+        <path d="M100 134 C 150 134, 150 145, 184 145" marker-end="url(#ef-arr)"/>
+        <path d="M222 156 L 222 174" marker-end="url(#ef-arr)"/>
+        <path d="M240 156 L 268 174" marker-end="url(#ef-arr)"/>
+      </g>
+      <text x="350" y="16" style="fill:var(--ink);font:600 14px var(--sans)">As bytes</text>
+      <text x="350" y="34" style="fill:var(--ink-3);font-size:12px">One contiguous run, read front to back</text>
+      <g style="font:11px var(--mono)">
+        <rect x="350" y="96" width="22" height="30" rx="3" style="fill:var(--surface-2);stroke:var(--ink-4);stroke-dasharray:3 2"/><text x="356" y="115" style="fill:var(--ink-3)">11</text>
+        <rect x="374" y="96" width="96" height="30" rx="3" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="380" y="115" style="fill:var(--ink)">Ilse Moreau</text>
+        <rect x="472" y="96" width="22" height="30" rx="3" style="fill:var(--orange-soft);stroke:var(--orange)"/><text x="477" y="115" style="fill:var(--ink)">37</text>
+        <rect x="496" y="96" width="16" height="30" rx="3" style="fill:var(--surface-2);stroke:var(--ink-4);stroke-dasharray:3 2"/><text x="500" y="115" style="fill:var(--ink-3)">2</text>
+        <rect x="514" y="96" width="16" height="30" rx="3" style="fill:var(--surface-2);stroke:var(--ink-4);stroke-dasharray:3 2"/><text x="518" y="115" style="fill:var(--ink-3)">5</text>
+        <rect x="532" y="96" width="44" height="30" rx="3" style="fill:var(--green-soft);stroke:var(--green)"/><text x="538" y="115" style="fill:var(--ink)">heron</text>
+        <rect x="578" y="96" width="16" height="30" rx="3" style="fill:var(--surface-2);stroke:var(--ink-4);stroke-dasharray:3 2"/><text x="582" y="115" style="fill:var(--ink-3)">4</text>
+        <rect x="596" y="96" width="38" height="30" rx="3" style="fill:var(--green-soft);stroke:var(--green)"/><text x="602" y="115" style="fill:var(--ink)">teal</text>
+      </g>
+      <text x="350" y="150" style="fill:var(--ink-3);font-size:11px">dashed: lengths and counts the reader needs to find the boundaries</text>
+    </svg>
+    </div>
+  </figure>
+
+  <h2>Serialization built into the language</h2>
+  <p>Most languages ship a way to dump an object to bytes with one call: <code>java.io.Serializable</code> in Java, <code>pickle</code> in Python, <code>Marshal</code> in Ruby. They are tempting because they handle arbitrary object graphs with no extra work. They are also a trap for anything that outlives a single process.</p>
+  <p>First, the bytes are tied to one language, and often to one version of one library, so the day a service in another language needs the data, you are stuck. Second, to rebuild the objects, the decoder has to create instances of whatever classes the bytes name. If those bytes came from outside, an attacker chooses the classes, and chains of ordinary library classes have been used to run arbitrary code during deserialization.<span class="sidenote">The Python documentation says it plainly: never unpickle data you do not trust. Java deserialization flaws have produced a long list of remote code execution advisories in application servers and frameworks.</span> Third, compatibility between versions of your own classes tends to be an afterthought, and the encodings are often slow and large. Use them for a cache that lives and dies with one deployment, if at all.</p>
+
+  <h2>JSON, XML, and CSV</h2>
+  <p>Text formats win on reach: every language can read them, and a person can read them too, which matters more than it sounds when you are debugging at 3 a.m. They also have real problems.</p>
+  <ul>
+    <li><strong>Numbers are vague.</strong> JSON has one number type and does not say whether a value is an integer, how many bits it needs, or how precise it is. XML and CSV cannot even tell a number from a string of digits without a schema.</li>
+    <li><strong>No binary strings.</strong> To send an image or a hash in JSON or XML you Base64-encode it, which costs a third more space and a decoding step, and the schema has to say which strings are really bytes.</li>
+    <li><strong>Schemas are optional.</strong> JSON Schema and XML Schema exist and are powerful, but many systems skip them, so the meaning of each field ends up hard-coded in every reader. CSV has no schema at all, and its escaping rules for commas, quotes, and newlines are implemented inconsistently.</li>
+  </ul>
+  <p>Below is one bird-sighting record from a citizen-science app. Change the fields and watch both encodings. Each byte is coloured by the field it belongs to.</p>
+
+  <figure class="widget" id="inspector">
+    <p class="widget-title">Byte inspector</p>
+    <p class="widget-sub">Edit the record. Hover or tap any byte to see what it is.</p>
+    <div class="rec-edit">
+      <label for="f-id"><span><i class="swatch fc-3"></i>id (64-bit)</span><input class="field" type="text" id="f-id" value="1438902750019283461" inputmode="numeric" spellcheck="false"></label>
+      <label for="f-observer"><span><i class="swatch fc-0"></i>observer</span><input class="field" type="text" id="f-observer" value="Ilse Moreau" spellcheck="false"></label>
+      <label for="f-count"><span><i class="swatch fc-1"></i>count</span><input class="field" type="text" id="f-count" value="37" inputmode="numeric" spellcheck="false"></label>
+      <label for="f-species"><span><i class="swatch fc-2"></i>species (comma separated)</span><input class="field" type="text" id="f-species" value="heron, teal" spellcheck="false"></label>
+      <div class="grp"><span><i class="swatch fc-4"></i>verified</span><label class="btn check"><input type="checkbox" id="f-verified" checked> verified</label></div>
+    </div>
+    <div class="byte-info" aria-live="polite"></div>
+    <div class="enc">
+      <div class="enc-head"><b>JSON, as UTF-8 text</b><span class="enc-size" id="size-json"></span></div>
+      <div class="enc-bar" id="bar-json"></div>
+      <div class="bytes" id="bytes-json"></div>
+    </div>
+    <div class="enc">
+      <div class="enc-head"><b>MessagePack</b><span class="enc-size" id="size-mp"></span></div>
+      <div class="enc-bar" id="bar-mp"></div>
+      <div class="bytes" id="bytes-mp"></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">JSON bytes</div><div class="stat-value" id="st-json"></div></div>
+      <div class="stat"><div class="stat-label">MessagePack bytes</div><div class="stat-value" id="st-mp"></div></div>
+      <div class="stat"><div class="stat-label">MessagePack saves</div><div class="stat-value" id="st-save"></div></div>
+      <div class="stat"><div class="stat-label">Same record as XML</div><div class="stat-value" id="st-xml"></div></div>
+    </div>
+    <p class="vrow-label">A JavaScript client reads the JSON back:</p>
+    <div class="readback"></div>
+    <div class="verdict" id="inspector-verdict"></div>
+  </figure>
+
+  <p>The id in that record looks like the ones produced by generators that pack a timestamp, a machine number, and a sequence counter into 64 bits. The JSON text carries all nineteen digits faithfully. The damage happens in the reader: JavaScript, and many JSON libraries in other languages, store every number as an IEEE 754 double, which has only 53 significant bits. Try an id under 9007199254740992 and it comes back intact.</p>
+
+  <figure class="widget" id="doubles">
+    <p class="widget-title">Where doubles stop counting</p>
+    <p class="widget-sub">Grow the integer and watch which of its bits a double can keep.</p>
+    <div class="controls">
+      <div class="control"><label for="bits">Integer size <output></output></label><input id="bits" type="range" min="40" max="64" step="1" value="61"></div>
+    </div>
+    <div class="bits" aria-hidden="true"></div>
+    <div class="bits-axis"><span>bit 63</span><span>bit 0</span></div>
+    <div class="legend"><span><i style="background:var(--accent)"></i>kept by the double</span><span><i style="background:var(--red)"></i>rounded away</span><span><i style="background:var(--surface-2);border:1px solid var(--line-2)"></i>leading zero</span></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Exact integer</div><div class="stat-value sm mono" id="d-exact"></div></div>
+      <div class="stat"><div class="stat-label">Nearest double</div><div class="stat-value sm mono" id="d-double"></div></div>
+      <div class="stat"><div class="stat-label">Error</div><div class="stat-value sm mono" id="d-err"></div></div>
+    </div>
+    <div class="verdict" id="doubles-verdict"></div>
+  </figure>
+
+  <p>The usual fix is boring and effective: if a value is an identifier rather than a quantity, send it as a string. You never do arithmetic on an id, and a string cannot be rounded.</p>
+
+  <h2>Binary variants of JSON</h2>
+  <p>Inside one organization, where nobody needs to read the bytes by eye, a more compact and faster format is attractive. MessagePack, CBOR, BSON (the format MongoDB stores), and Smile all keep JSON's data model and change only the encoding: a type marker per value, integers in binary with explicit widths, and lengths in front of strings instead of quotes around them.</p>
+  <p>Look at what the inspector shows, though. The keys <code>observer</code>, <code>species</code>, and the rest are still spelled out in every single record, because without a schema the reader has no other way to know which value is which. For records with short values and descriptive names, the field names are most of the payload, and the binary variant saves only a fraction. Saving a fifth or a quarter is rarely worth giving up human readability. To do much better, the field names have to leave the data, and that requires a schema. That is the subject of the next lesson.</p>
+  <p>None of this makes JSON a bad choice. For public APIs, configuration, and data exchanged between organizations, the fact that everyone can read and write it outweighs its size and its quirks, as long as both sides agree on the awkward parts, such as how big numbers and binary data are represented.</p>
+
+  <p class="book-ref">In the book: Chapter 4, "Formats for Encoding Data" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch4-bytes.js"></script>
+</body>
+</html>

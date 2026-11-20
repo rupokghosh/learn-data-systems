@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forward and backward compatibility · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch4.css">
+</head>
+<body data-lesson="schema-evolution">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Forward and backward compatibility</h1>
+  </header>
+
+  <p>A schema change is never deployed everywhere at once. Server-side code rolls out a few machines at a time, so for minutes or hours some nodes run the new version and some run the old one. Mobile and desktop apps update whenever their users get around to it, which may be never. And the database still holds rows written by every version of the code that has ever run. For a while, often forever, old and new versions of the schema have to coexist.</p>
+
+  <h2>Two directions</h2>
+  <p>That coexistence needs compatibility in both directions:</p>
+  <ul>
+    <li><strong>Backward compatibility</strong>: new code can read data written by old code. This is the easy one, because when you write the new code you know exactly what the old data looks like and can handle it.</li>
+    <li><strong>Forward compatibility</strong>: old code can read data written by new code. This is harder, because the old code was written before anyone knew what the change would be. It only works if the old code was built to tolerate things it does not understand, mostly by ignoring them.</li>
+  </ul>
+  <p>The encodings from the previous lesson were designed with exactly this in mind, and each has a short list of rules. Break a rule and some combination of old and new code fails, or worse, silently reads the wrong value.</p>
+
+  <h2>The rules, by format</h2>
+  <p><strong>With field tags</strong> (Protocol Buffers and Thrift), the tag is the identity of a field. You may add a field with a new tag, and old code will skip it, because the type in its header tells the parser how many bytes to jump over. The new field must be optional or have a default, because new code reading old data will not find it. You may remove a field only if it was optional, and you must never hand its tag to a different field later.<span class="sidenote">Protocol Buffers has a keyword for this: <code>reserved 3;</code> makes the compiler reject any future field that tries to reuse tag 3.</span> Renaming is free, since names never appear in the bytes.</p>
+  <p><strong>With Avro</strong>, the field name is the identity, and the default value does the work that optional tags do elsewhere. You may add or remove a field only if it has a default; then whichever side lacks it uses the default. A field that may be absent is usually declared as a union with <code>null</code> and a default of <code>null</code>. Renaming is possible through aliases on the reader's schema, but only in one direction: a new reader can know the old name, while an old reader can never know the new one.</p>
+  <p><strong>Changing a type</strong> is risky everywhere. Widening an int to a long is the classic case, and the three formats disagree on what happens when old code meets a value that no longer fits. Try it below.</p>
+
+  <figure class="widget" id="evo-lab">
+    <p class="widget-title">Schema evolution lab</p>
+    <p class="widget-sub">Pick a format, toggle changes to build v2, and read the matrix.</p>
+    <div class="btn-row">
+      <button class="btn" type="button" data-format="protobuf" aria-pressed="true">Protocol Buffers</button>
+      <button class="btn" type="button" data-format="thrift" aria-pressed="false">Thrift</button>
+      <button class="btn" type="button" data-format="avro" aria-pressed="false">Avro</button>
+    </div>
+    <div class="change-grid"></div>
+    <div class="schema-pair">
+      <div><div class="lane-label">v1, what old code was built with</div><pre class="schema" id="schema-v1"></pre></div>
+      <div><div class="lane-label">v2, what new code is built with</div><pre class="schema" id="schema-v2"></pre></div>
+    </div>
+    <div class="legend"><span><i style="background:var(--green)"></i>added</span><span><i style="background:var(--red)"></i>removed</span><span><i style="background:var(--accent)"></i>renamed</span><span><i style="background:var(--orange)"></i>type changed</span></div>
+    <div class="matrix"></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Backward compatible</div><div class="stat-value" id="st-back"></div></div>
+      <div class="stat"><div class="stat-label">Forward compatible</div><div class="stat-value" id="st-fwd"></div></div>
+    </div>
+    <div class="verdict" id="evo-verdict"></div>
+    <figcaption>The sample record is a file upload: the owner kemi, a size, and one label. When v2 widens the size to a long, the v2 writer stores a 5 GiB file, which does not fit in 32 bits.</figcaption>
+  </figure>
+
+  <p>A few patterns are worth noticing. Adding a required field always breaks backward compatibility, in every format, because old records do not contain it. In Avro, giving it a default fixes that; in Protocol Buffers and Thrift it does not, since a required check is not satisfied by a default, which is one reason proto3 removed <code>required</code>. Renames are harmless with tags and fatal in Avro without an alias. And the int-to-long change is the most instructive: Protocol Buffers truncates the number without complaint, Thrift drops the field without complaint, and Avro refuses to decode. Only one of those failures is loud, and it is the one you would prefer.</p>
+
+  <h2>Old code that rewrites new data</h2>
+  <p>Ignoring unknown fields is what makes forward compatibility work, and it creates a quieter problem. Suppose old code reads a record, changes one field, and writes the whole record back. If its decoder discarded the fields it did not recognise, the write-back erases them. Nobody sees an error, and the newer code finds its data gone the next time it looks.</p>
+  <p>Below, three application servers share one database row during a rolling upgrade. Version 2 of the code adds a checksum to every upload record it writes. Play the scenario, then turn on unknown-field preservation and play it again.</p>
+
+  <figure class="widget" id="rolling">
+    <p class="widget-title">Rolling upgrade, one shared row</p>
+    <p class="widget-sub">Play the scenario, or deploy servers and edit the row yourself. Actions queue in order.</p>
+    <div class="btn-row">
+      <button class="btn primary" type="button" id="play-failure">Play scenario</button>
+      <label class="btn check"><input type="checkbox" id="preserve"> Preserve unknown fields</label>
+      <button class="btn" type="button" id="reset-rolling">Reset</button>
+    </div>
+    <div class="srv-grid"></div>
+    <div class="flowline" aria-live="polite"><span></span></div>
+    <div class="dbbox">
+      <div class="lane-label"><span>Database: uploads, row 8812</span></div>
+      <div class="dbrow"></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Servers on v2</div><div class="stat-value" id="st-v2"></div></div>
+      <div class="stat"><div class="stat-label">Times a checksum was lost</div><div class="stat-value" id="st-lost"></div></div>
+    </div>
+    <ol class="steps"></ol>
+    <div class="verdict" id="rolling-verdict"></div>
+  </figure>
+
+  <p>The fix is for decoders to keep what they do not understand. Protocol Buffers generated classes hold unknown fields and write them back out, behaviour that proto3 lost for a while and regained in version 3.5 because of exactly this problem. The same trap exists one layer up: an ORM that maps a row onto a class, or a service that decodes JSON into a fixed struct and re-encodes it, drops anything the class does not declare. Two practical defences are to keep a catch-all for unknown fields in such models, and to prefer targeted updates, such as an <code>UPDATE</code> that sets one column, over read-modify-write of whole records while versions are mixed.</p>
+  <p>Rollout order matters too. If new readers must be in place before anyone writes the new field, deploy the reading side everywhere first, and only then turn on the code path that writes it, often behind a feature flag.</p>
+
+  <p class="book-ref">In the book: Chapter 4, "Thrift and Protocol Buffers", "Avro", and "Dataflow Through Databases" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch4-evolution.js"></script>
+</body>
+</html>

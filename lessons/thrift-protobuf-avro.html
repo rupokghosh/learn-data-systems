@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thrift, Protocol Buffers, and Avro · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch4.css">
+</head>
+<body data-lesson="thrift-protobuf-avro">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Thrift, Protocol Buffers, and Avro</h1>
+  </header>
+
+  <p>The binary JSON variants in the previous lesson could not shrink much, because every record still had to carry its own field names. Apache Thrift (from Facebook), Protocol Buffers (from Google), and Apache Avro (from the Hadoop project) take the names out of the data entirely. Writer and reader both hold a <strong>schema</strong> that describes the record, so the bytes only need to say which field comes next, or, in Avro's case, nothing at all.</p>
+
+  <h2>Write the schema once</h2>
+  <p>You describe the record in an interface definition language and run a code generator that produces classes for Java, Go, Python, C++, and so on. Here is the bird-sighting record from the previous lesson in Thrift and in Protocol Buffers (proto2 syntax):</p>
+
+<pre><code>struct Sighting {                  message Sighting {
+  1: required string observer,       required string observer = 1;
+  2: optional i64 count,             optional sint64 count = 2;
+  3: optional list&lt;string&gt; species,  repeated string species = 3;
+  4: optional bool verified,         optional bool verified = 4;
+}                                  }</code></pre>
+
+  <p>The numbers are <strong>field tags</strong>. In the encoded bytes, a field is identified by its tag, never by its name. That has a consequence the next lesson depends on: you can rename a field in the schema whenever you like, but a tag, once used, means that field forever.</p>
+
+  <h2>Four encodings of one record</h2>
+  <p>The same record, encoded by real implementations of each format's rules. Edit the values and watch the byte counts. Hover a byte to see whether it is a type, a tag, a length, or part of a value.</p>
+
+  <figure class="widget" id="three-ways">
+    <p class="widget-title">One record, byte by byte</p>
+    <p class="widget-sub">Try a negative count, a long species list, or clearing the count.</p>
+    <div class="rec-edit">
+      <label for="s-observer"><span><i class="swatch fc-0"></i>observer (tag 1)</span><input class="field" type="text" id="s-observer" value="Ilse Moreau" spellcheck="false"></label>
+      <label for="s-count"><span><i class="swatch fc-1"></i>count (tag 2)</span><input class="field" type="text" id="s-count" value="37" inputmode="numeric" spellcheck="false"></label>
+      <label for="s-species"><span><i class="swatch fc-2"></i>species (tag 3)</span><input class="field" type="text" id="s-species" value="heron, teal, grebe" spellcheck="false"></label>
+      <div class="grp"><span><i class="swatch fc-4"></i>verified (tag 4), and whether count is set</span><span class="btn-row" style="margin:0"><label class="btn check"><input type="checkbox" id="s-verified" checked> verified</label><label class="btn check"><input type="checkbox" id="s-has-count" checked> count set</label></span></div>
+    </div>
+    <div class="byte-info" aria-live="polite"></div>
+    <div class="enc-head"><span>Compact JSON of the same record, for comparison</span><span class="enc-size" id="sz-json"></span></div>
+    <div class="enc-list"></div>
+    <div class="cell-key"><span><i class="dash"></i>framing: type, tag, length, end</span><span><i></i>value bytes (characters shown when printable)</span></div>
+  </figure>
+
+  <p>Thrift's <strong>BinaryProtocol</strong> is the straightforward one: each field starts with a type byte and a 2-byte tag, strings carry a 4-byte length, and an <code>i64</code> always takes 8 bytes, even when it holds 37. It is simple and fast to parse, and it is the biggest of the four.</p>
+  <p><strong>CompactProtocol</strong> and <strong>Protocol Buffers</strong> pack more into less. The tag and the type share one byte: Thrift Compact stores the difference from the previous tag in the high four bits (clear the count and watch the species header change from delta 1 to delta 2), while Protocol Buffers stores <code>(tag &lt;&lt; 3) | wire_type</code>. Integers and lengths become <strong>varints</strong>, which use as many bytes as the number needs. A Thrift Compact boolean disappears into its field header altogether.</p>
+  <p>Signed numbers need one more trick. A varint of a negative number in two's complement would always be huge, so these formats first apply <strong>zigzag</strong> encoding, which interleaves negatives with positives so that small magnitudes stay small.</p>
+
+  <figure class="widget" id="varint">
+    <p class="widget-title">Varint and zigzag</p>
+    <p class="widget-sub">Type a number or pick one. Turn zigzag off to see what a negative number costs without it.</p>
+    <div class="btn-row">
+      <input class="field" type="text" id="v-num" value="9000" inputmode="numeric" spellcheck="false" aria-label="Number to encode" style="width:180px">
+      <label class="btn check"><input type="checkbox" id="v-zigzag" checked> zigzag</label>
+    </div>
+    <div class="btn-row">
+      <button class="btn" type="button" data-n="0">0</button><button class="btn" type="button" data-n="127">127</button><button class="btn" type="button" data-n="128">128</button><button class="btn" type="button" data-n="-1">−1</button><button class="btn" type="button" data-n="-9000">−9000</button><button class="btn" type="button" data-n="4102444800">4102444800</button>
+    </div>
+    <p class="note" id="v-step"></p>
+    <p class="vrow-label">Bytes on the wire, in order (orange: the continuation bit)</p>
+    <div class="vgroups"></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Varint bytes</div><div class="stat-value" id="v-bytes"></div></div>
+      <div class="stat"><div class="stat-label">Fixed 64-bit bytes</div><div class="stat-value" id="v-fixed"></div></div>
+      <div class="stat"><div class="stat-label">Hex</div><div class="stat-value sm mono" id="v-hex"></div></div>
+    </div>
+    <p class="vrow-label">Zigzag mapping</p>
+    <div class="zz"></div>
+    <div class="verdict" id="varint-verdict"></div>
+  </figure>
+
+  <h2>Required, optional, and repeated</h2>
+  <p>Look for <code>required</code> in the bytes and you will not find it. Required and optional change nothing about the encoding; they only change what the generated code checks. A required field that is missing makes parsing fail, which catches bugs early and, as the next lesson shows, makes schemas hard to change. Protocol Buffers dropped <code>required</code> in proto3 for that reason, and many teams using proto2 or Thrift ban it by convention.</p>
+  <p>Lists differ too. Thrift has a real <code>list</code> type with a header that says the element type and count. Protocol Buffers has no list type: a <code>repeated</code> field is simply the same tag appearing several times, which you can see as three separate keys for the three species. A nice side effect is that an optional single-valued field can later become repeated: old code reading new data sees several values and keeps the last one.</p>
+
+  <h2>Avro: no tags at all</h2>
+  <p>Avro's encoding is the smallest because it leaves out even the tags. The bytes are just the values, one after another, in the order the schema lists them: a length and some UTF-8, a union branch number and a zigzag varint, an array block. Nothing in the data says which field a value belongs to or what type it is.</p>
+
+<pre><code>record Sighting {
+  string observer;
+  union { null, long } count = null;
+  array&lt;string&gt; species;
+  boolean verified;
+}</code></pre>
+
+  <p>So a reader can only decode Avro data if it knows the exact schema the writer used, the <strong>writer's schema</strong>. It decodes with that, then translates the result into the schema its own code expects, the <strong>reader's schema</strong>. The two do not need to be identical, only compatible. Avro matches fields by name, so order does not matter. A field the writer had and the reader does not is ignored. A field the reader expects and the writer did not have is filled from the default in the reader's schema.</p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 230" role="img" aria-label="Writer schema fields on the left and reader schema fields on the right, connected by name. photoUrl exists only for the writer and is ignored. region exists only for the reader and gets its default.">
+      <text x="0" y="16" style="fill:var(--ink);font:600 14px var(--sans)">Writer's schema</text>
+      <text x="0" y="33" style="fill:var(--ink-3);font-size:12px">mobile app 5.2, in the file header</text>
+      <text x="400" y="16" style="fill:var(--ink);font:600 14px var(--sans)">Reader's schema</text>
+      <text x="400" y="33" style="fill:var(--ink-3);font-size:12px">nightly report job</text>
+      <g style="font:12px var(--mono)">
+        <g class="dg-node"><rect x="0" y="50" width="200" height="28" rx="5"/><text x="10" y="69">string observer</text></g>
+        <g class="dg-node"><rect x="0" y="84" width="200" height="28" rx="5"/><text x="10" y="103">long? count</text></g>
+        <g class="dg-node"><rect x="0" y="118" width="200" height="28" rx="5"/><text x="10" y="137">array species</text></g>
+        <g class="dg-node"><rect x="0" y="152" width="200" height="28" rx="5"/><text x="10" y="171">boolean verified</text></g>
+        <g class="dg-node miss"><rect x="0" y="186" width="200" height="28" rx="5"/><text x="10" y="205">string? photoUrl</text></g>
+        <g class="dg-node"><rect x="400" y="50" width="240" height="28" rx="5"/><text x="410" y="69">array species</text></g>
+        <g class="dg-node"><rect x="400" y="84" width="240" height="28" rx="5"/><text x="410" y="103">string observer</text></g>
+        <g class="dg-node active"><rect x="400" y="118" width="240" height="28" rx="5"/><text x="410" y="137">string region = "unknown"</text></g>
+        <g class="dg-node"><rect x="400" y="152" width="240" height="28" rx="5"/><text x="410" y="171">long? count</text></g>
+        <g class="dg-node"><rect x="400" y="186" width="240" height="28" rx="5"/><text x="410" y="205">boolean verified</text></g>
+      </g>
+      <g style="stroke:var(--ink-3);stroke-width:1.3;fill:none">
+        <path d="M202 64 C 300 64, 300 98, 398 98"/>
+        <path d="M202 98 C 300 98, 300 166, 398 166"/>
+        <path d="M202 132 C 300 132, 300 64, 398 64"/>
+        <path d="M202 166 C 300 166, 300 200, 398 200"/>
+      </g>
+      <text x="208" y="204" style="fill:var(--orange);font-size:11px">← not read: ignored</text>
+      <text x="394" y="136" text-anchor="end" style="fill:var(--accent);font-size:11px">not written: default →</text>
+    </svg>
+    </div>
+    <figcaption>Fields are matched by name, not position. Order can differ freely.</figcaption>
+  </figure>
+
+  <p>Where does the reader get the writer's schema? Sending it with every record would erase the size advantage, so it depends on the setting.<span class="sidenote">This is also why Avro suits schemas generated by a program, for example one Avro schema per database table in an export job. With no tags to assign by hand, a changed table simply produces a new schema.</span></p>
+  <ul>
+    <li><strong>Large files</strong> of many records, as in Hadoop or a data lake, store the writer's schema once in the file header. Avro's object container files do exactly this.</li>
+    <li><strong>Databases and logs</strong> where records were written over months by different code versions store a small schema version number with each record and keep the schemas in a registry. Kafka deployments commonly use a schema registry this way, with the id in the first bytes of each message.</li>
+    <li><strong>Network connections</strong> can agree on the schema once when the connection opens and use it for the connection's lifetime.</li>
+  </ul>
+  <p>Whichever format you use, the schema becomes valuable documentation that cannot drift from the data, and a registry of past schemas lets you check, before you deploy, whether a change will break readers. The next lesson does that check interactively.</p>
+
+  <p class="book-ref">In the book: Chapter 4, "Thrift and Protocol Buffers" and "Avro" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch4-schemas.js"></script>
+</body>
+</html>
