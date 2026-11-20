@@ -1,0 +1,6 @@
+# Only the site itself is deployed.
+video
+.claude
+PLAN.md
+skills-lock.json
+*.md
