@@ -22,7 +22,7 @@ import { esc, makeLoop } from "./ch10-util.js";
     sort: () => `<span class="mono">sort</span> puts identical values next to each other. The shaded bands are the runs of equal lines. On a file larger than memory, sort writes sorted chunks to temporary files and merges them.`,
     uniq: (s) => `<span class="mono">uniq -c</span> collapses each run of adjacent equal lines into one line with a count. It only compares a line with the one before it, which is why the sort had to come first. ${s.n} distinct values remain.`,
     sortn: () => `<span class="mono">sort -rn</span> orders the lines by their leading number, largest first. Same program as before, different flags.`,
-    head: () => `<span class="mono">head</span> keeps the first ${st.headN} lines and then exits. That is the report: the most frequent ${FIELDS[st.field].label} values in this log.`,
+    head: () => `<span class="mono">head</span> keeps the first ${st.headN === 1 ? "line" : `${st.headN} lines`} and then exits. That is the report: the most frequent ${FIELDS[st.field].label} values in this log.`,
   };
 
   function compute() { stages = runPipeline(st.lines, FIELDS[st.field].n, st.headN); }

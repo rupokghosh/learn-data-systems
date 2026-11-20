@@ -60,6 +60,7 @@ function draw(w, until = +nowIn.value) {
   const Y = { evAxis: 44, prAxis: 140, band: 180, bandH: o.type === "hopping" ? 26 : 16, barTop: 240, barBase: 336 };
   // axes
   const ticks = niceTicks(0, END, Math.max(4, Math.floor(w / 70)));
+  const axisTitles = [];
   for (const [y, label] of [[Y.evAxis, "Event time (when the gate scanned)"], [Y.prAxis, "Processing time (when it was handled)"]]) {
     el("line", { x1: L, x2: R, y1: y, y2: y, class: "axis" }, svg);
     for (const v of ticks) {
@@ -67,12 +68,14 @@ function draw(w, until = +nowIn.value) {
       const tt = el("text", { x: x(v), y: y + 15, "text-anchor": "middle" }, svg); tt.textContent = `${v}s`;
     }
     const lt = el("text", { x: L, y: y - 30, class: "title" }, svg); lt.textContent = label;
+    axisTitles.push(lt);
   }
-  // outage band on the processing axis
+  // outage band on the processing axis; its label sits inside the band, clear of the axis title
   if (outageIn.checked) {
-    el("rect", { x: x(OUTAGE[0]), y: Y.prAxis - 22, width: x(OUTAGE[1]) - x(OUTAGE[0]), height: 22, class: "outage" }, svg);
-    const ot = el("text", { x: (x(OUTAGE[0]) + x(OUTAGE[1])) / 2, y: Y.prAxis - 25, "text-anchor": "middle", style: "fill:var(--red)" }, svg);
-    ot.textContent = "processor down";
+    const bw = x(OUTAGE[1]) - x(OUTAGE[0]);
+    el("rect", { x: x(OUTAGE[0]), y: Y.prAxis - 22, width: bw, height: 22, class: "outage" }, svg);
+    const ot = el("text", { x: x(OUTAGE[0]) + bw / 2, y: Y.prAxis - 7, "text-anchor": "middle", style: "fill:var(--red)" }, svg);
+    ot.textContent = bw >= 84 ? "processor down" : "outage";
   }
   // events: connector, dot on each axis
   const gl = el("g", {}, svg), gd = el("g", {}, svg);
@@ -89,6 +92,8 @@ function draw(w, until = +nowIn.value) {
   if (until < END) {
     el("line", { x1: x(until), x2: x(until), y1: Y.prAxis - 26, y2: Y.prAxis + 4, class: "now" }, svg);
   }
+  // keep the axis titles readable above the event links
+  for (const lt of axisTitles) svg.appendChild(lt);
 
   // window bands
   const bt = el("text", { x: L, y: Y.band - 8, class: "title" }, svg);
@@ -173,7 +178,7 @@ function stats(o, r, t, wins, until) {
     say(verdict, `Windows are cut by the processor's clock, so each scan is counted when it was handled, not when it happened. ${outageIn.checked ? "The outage leaves the windows between 50 s and 70 s nearly empty and dumps the whole backlog into the next one: a traffic spike that never happened at the gates." : "Delays smear counts into later windows, and very late scans land in windows long after the fact. Turn on the processor outage to see how bad it gets."} Nothing is ever late, which is exactly the problem.`, wrong ? "bad" : "");
   } else if (o.policy === "drop") {
     say(verdict, dropped
-      ? `${dropped} scan${dropped === 1 ? " arrived" : "s arrived"} after the watermark had passed ${dropped === 1 ? "its" : "their"} window and ${dropped === 1 ? "was" : "were"} dropped, so ${o.type === "session" ? "the published session counts miss them" : `${wrong} published count${wrong === 1 ? " is" : "s are"} too low`}. A larger watermark lag catches more stragglers, but every result then waits longer (now ${wait.toFixed(1)} s on average).`
+      ? `${dropped} scan${dropped === 1 ? " arrived" : "s arrived"} after the watermark had passed ${dropped === 1 ? "its" : "their"} window and ${dropped === 1 ? "was" : "were"} dropped, so ${o.type === "session" ? `the published session counts miss ${dropped === 1 ? "it" : "them"}` : `${wrong} published count${wrong === 1 ? " is" : "s are"} too low`}. A larger watermark lag catches more stragglers, but every result then waits longer (now ${wait.toFixed(1)} s on average).`
       : `No scan was dropped. The price is latency: each window waited ${wait.toFixed(1)} s on average after it ended before its count was published.`, dropped ? "bad" : "good");
   } else {
     say(verdict, corr
@@ -193,7 +198,9 @@ sizeIn.addEventListener("input", () => { syncSize(); redraw(); });
 lagIn.addEventListener("input", () => { labelOf(lagIn).textContent = `${lagIn.value} s`; redraw(); });
 lateIn.addEventListener("input", () => { labelOf(lateIn).textContent = `${lateIn.value}%`; regenerate(); redraw(); });
 outageIn.addEventListener("change", () => { regenerate(); redraw(); });
-nowIn.addEventListener("input", () => { anim?.finish(); anim = null; playBtn.textContent = "Play"; labelOf(nowIn).textContent = `${(+nowIn.value).toFixed(0)} s`; redraw(); });
+nowIn.addEventListener("input", () => {
+  // Stopping a running Play jumps it to its end, so keep the value the reader dragged to.
+  const v = nowIn.value; anim?.finish(); anim = null; nowIn.value = v; playBtn.textContent = "Play"; labelOf(nowIn).textContent = `${(+nowIn.value).toFixed(0)} s`; redraw(); });
 radio([...root.querySelectorAll("[data-type]")], "type", (v) => {
   const wasSession = opts.type === "session";
   opts.type = v;

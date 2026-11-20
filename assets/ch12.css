@@ -56,7 +56,7 @@
 .seq-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 12px 24px; align-items: start; }
 @media (max-width: 620px) { .seq-wrap { grid-template-columns: minmax(0, 1fr); } }
 .seq { overflow-x: auto; }
-.seq svg { display: block; width: 100%; min-width: 360px; }
+.seq svg { display: block; width: 100%; min-width: 320px; }
 .seq .lifeline { stroke: var(--line-2); stroke-width: 1; }
 .seq .lane-name { font: 500 12px var(--sans); fill: var(--ink); }
 .seq .m { stroke: var(--ink-3); stroke-width: 1.4; fill: none; }

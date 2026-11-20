@@ -68,6 +68,7 @@
 
 /* ---------- Pregel graph ---------- */
 .pg-v circle { fill: var(--bg); stroke: var(--line-2); stroke-width: 1.5; transition: fill 200ms ease, stroke 200ms ease; cursor: pointer; }
+.pg-v.static circle { cursor: default; }
 .pg-v.changed circle { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
 .pg-v.source circle { stroke: var(--ink); stroke-width: 2; }
 .pg-v text.val { fill: var(--ink); font: 500 14px var(--mono); text-anchor: middle; pointer-events: none; }

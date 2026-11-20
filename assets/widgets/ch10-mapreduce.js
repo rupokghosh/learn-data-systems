@@ -65,7 +65,9 @@ function say(text, cls = "") { verdict.className = `verdict ${cls}`; verdict.tex
 async function doStep() {
   if (job.done) return false;
   let res;
+  const mine = job;
   await mover.flip(() => { res = job.step(); render(); });
+  if (job !== mine) return false; // Reset while the records were moving
   say(res.text, job.done ? "good" : "");
   if (job.done) say(`Done. Five output records across two files, in sorted order within each file.${job.state.attempts > 3 ? ` The failed map task cost ${job.state.attempts - 3} extra attempt${job.state.attempts > 4 ? "s" : ""}, but the result is identical, because a map task is a deterministic function of its input block.` : ""}`, "good");
   return !job.done;

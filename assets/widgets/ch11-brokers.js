@@ -180,8 +180,9 @@ import { say, makeLoop, radio } from "./ch11-util.js";
       const redo = b.crash(name);
       const moves = describeMoves(b.notes);
       render();
-      const again = redo.map((r) => `P${r.p} offsets ${r.from}${r.to > r.from ? ` to ${r.to}` : ""}`).join(" and ");
-      say(verdict, `${name} crashed. ${moves ? moves + "." : ""} The new owner starts from the last committed offset. ${again
+      const again = redo.map((r) => `P${r.p} offset${r.to > r.from ? `s ${r.from} to ${r.to}` : ` ${r.from}`}`).join(" and ");
+      const resume = b.consumers.length ? "The new owner starts from the last committed offset." : "Whichever consumer joins next will start from the last committed offset.";
+      say(verdict, `${name} crashed. ${moves ? moves + "." : ""} ${resume} ${again
         ? `${name} had processed ${again} without committing, so those messages will be processed a second time.`
         : `${name} had committed everything it processed, so nothing is repeated.`}`, redo.length ? "bad" : "good");
     } else if (t.hasAttribute("data-add")) {
@@ -320,7 +321,9 @@ import { say, makeLoop, radio } from "./ch11-util.js";
       crashedAt = m;
       render();
       say(verdict, m
-        ? `B crashed while holding ${m.id}. It was never acknowledged. Once the broker notices that B is gone, after a timeout of a few ticks, it puts ${m.id} back at the front of the queue. Meanwhile A keeps taking later invoices.`
+        ? mode === "balance"
+          ? `B crashed while holding ${m.id}. It was never acknowledged. Once the broker notices that B is gone, after a timeout of a few ticks, it puts ${m.id} back at the front of the queue. Meanwhile A keeps taking later invoices.`
+          : `B crashed while holding ${m.id}. It was never acknowledged. Once the broker notices that B is gone, after a timeout of a few ticks, it puts ${m.id} back at the front of B's own queue, where it waits for B to restart. A reads from its own queue and is not affected.`
         : "B crashed while idle. Nothing was in flight, so nothing needs redelivery.", m ? "bad" : "");
     } else {
       q.restart("B");

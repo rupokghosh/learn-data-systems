@@ -61,7 +61,7 @@ import { say, radio, makeLoop, esc } from "./ch11-util.js";
           : `With the change stream this fast, every purchase met the right version of its member row. Increase the delay to see what happens when the two streams drift apart.`, bad.length ? "bad" : "good");
       } else {
         const maxWait = Math.max(...all.map((o) => o.waited));
-        say(verdict, `Every purchase is joined with the tier that was valid at its event time, regardless of delay. The cost: the processor keeps table history and holds each purchase until the change stream has caught up, up to ${maxWait.toFixed(1)} s here.`, "good");
+        say(verdict, `Every purchase is joined with the tier that was valid at its event time, regardless of delay. The cost: the processor keeps table history and holds each purchase until the change stream has caught up${maxWait > 0.05 ? `, up to ${maxWait.toFixed(1)} s here` : ". With no change stream delay, nothing had to wait here"}.`, "good");
       }
     } else if (k === 0) {
       say(verdict, "Press Step or Play to feed the processor one arrival at a time.");
@@ -244,8 +244,9 @@ import { say, radio, makeLoop, esc } from "./ch11-util.js";
     if (!crashed) { say(verdict, "All ten messages processed without a crash. Every strategy looks correct on a good day; reset and crash it partway through."); return; }
     if (t.lost) say(verdict, `${t.lost} message${t.lost === 1 ? " was" : "s were"} never written: the offset said they were done before their outputs existed. This is at-most-once processing.`, "bad");
     else if (t.dup) say(verdict, `${t.dup} duplicate ledger row${t.dup === 1 ? "" : "s"}: those messages were written, the crash came before the commit, and they were processed again. This is at-least-once processing. The member now has ${t.visible * POINTS} points instead of ${N * POINTS}.`, "bad");
-    else if (strategy === "idempotent") say(verdict, `Messages were processed more than once (${c.overwrites} repeat write${c.overwrites === 1 ? "" : "s"}), but each repeat overwrote the same keyed row, so the ledger is exactly right. At-least-once delivery plus idempotent writes gives exactly-once effects.`, "good");
-    else say(verdict, "No loss and no duplicates. The crash rolled back the open transaction together with its uncommitted offset, so the restarted consumer redid exactly the work that had been discarded.", "good");
+    else if (strategy === "idempotent" && c.overwrites) say(verdict, `Messages were processed more than once (${c.overwrites} repeat write${c.overwrites === 1 ? "" : "s"}), but each repeat overwrote the same keyed row, so the ledger is exactly right. At-least-once delivery plus idempotent writes gives exactly-once effects.`, "good");
+    else if (strategy === "atomic" && c.sink.some((r) => r.state === "aborted")) say(verdict, "No loss and no duplicates. The crash rolled back the open transaction together with its uncommitted offset, so the restarted consumer redid exactly the work that had been discarded.", "good");
+    else say(verdict, "No loss and no duplicates, but only because the crash landed right after a commit, so there was no unfinished work to lose or repeat. Reset and crash in the middle of a batch.");
   }
 
   crashBtn.addEventListener("click", () => {
@@ -256,7 +257,7 @@ import { say, radio, makeLoop, esc } from "./ch11-util.js";
     const { committed, pos } = before;
     if (strategy === "before") {
       say(verdict, committed > pos
-        ? `Crashed after committing offset ${committed} but with outputs only up to msg ${pos - 1}. On restart the consumer starts at ${committed}, so ${committed - pos === 1 ? `msg ${pos}` : `msg ${pos} to ${committed - 1}`} will never be written.`
+        ? `Crashed after committing offset ${committed} but ${pos > 0 ? `with outputs only up to msg ${pos - 1}` : "before writing a single output"}. On restart the consumer starts at ${committed}, so ${committed - pos === 1 ? `msg ${pos}` : `msg ${pos} to ${committed - 1}`} will never be written.`
         : `Crashed between batches, with nothing uncommitted. You were lucky; crash in the middle of a batch.`, committed > pos ? "bad" : "");
     } else if (strategy === "atomic") {
       say(verdict, `Crashed. The open transaction is rolled back: its pending outputs disappear together with the uncommitted offset. The consumer will restart from ${committed}.`, "good");

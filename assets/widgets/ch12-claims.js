@@ -93,9 +93,12 @@ function render() {
     if (mode === "log") {
       verdict.className = "verdict good";
       verdict.textContent = `Every handle has exactly one owner. Try new network delays: the winners can change, but there is never a tie, because each partition decides in the order of its log.`;
-    } else {
+    } else if (dups) {
       verdict.className = "verdict bad";
-      verdict.textContent = `${dups} handle${dups === 1 ? "" : "s"} ended up with two owners. Each server checked, saw the handle free, and inserted, because the other insert had not committed yet.`;
+      verdict.textContent = `${dups} handle${dups === 1 ? "" : "s"} ended up with more than one owner. Each server checked, saw the handle free, and inserted, because the other insert had not committed yet.`;
+    } else {
+      verdict.className = "verdict";
+      verdict.textContent = "This time no handle got two owners, but only because no two claims for the same handle happened to overlap. Nothing in check-then-insert prevents it: try new network delays.";
     }
   } else {
     verdict.className = "verdict";

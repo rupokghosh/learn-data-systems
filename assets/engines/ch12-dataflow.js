@@ -80,15 +80,17 @@ const countDocked = (rideableOnly) => ({
   total(st) { return STATIONS.reduce((a, s) => a + this.count(st, s), 0); },
 });
 
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 const searchV1 = {
   ...countDocked(false), title: "Station search", short: "Search",
   lag: 700, from: "beginning",
-  summary(st) { return [`${this.total(st)} bikes available`, st.last ? `${st.last}: ${this.count(st, st.last)}` : ""]; },
+  summary(st) { return [`${plural(this.total(st), "bike")} available`, st.last ? `${st.last}: ${this.count(st, st.last)}` : ""]; },
 };
 const searchV2 = {
   ...countDocked(true), title: "Station search", short: "Search",
   lag: 700, from: "beginning",
-  summary(st) { return [`${this.total(st)} rideable bikes`, st.last ? `${st.last}: ${this.count(st, st.last)}` : ""]; },
+  summary(st) { return [plural(this.total(st), "rideable bike"), st.last ? `${st.last}: ${this.count(st, st.last)}` : ""]; },
 };
 
 export const KINDS = {
@@ -104,14 +106,14 @@ export const KINDS = {
     },
     summary(st) {
       const inUse = Object.values(st.where).filter((v) => v === "in use").length;
-      return [`${inUse} bikes out on rides`, st.last ? `${st.last} → ${st.where[st.last] ?? "docked"}` : ""];
+      return [`${plural(inUse, "bike")} out on rides`, st.last ? `${st.last} → ${st.where[st.last] ?? "docked"}` : ""];
     },
   },
   warehouse: {
     title: "Analytics warehouse", short: "Warehouse", lag: 300, batch: 4000, from: "beginning",
     init: () => ({ rides: 0, minutes: 0 }),
     apply(st, ev) { if (ev.type === "end") { st.rides++; st.minutes += ev.minutes; } return st; },
-    summary(st) { return [`${st.rides} completed rides`, st.rides ? `average ${(st.minutes / st.rides).toFixed(1)} min` : ""]; },
+    summary(st) { return [plural(st.rides, "completed ride"), st.rides ? `average ${(st.minutes / st.rides).toFixed(1)} min` : ""]; },
   },
   model: {
     title: "Rebalancing model", short: "Model", lag: 1800, from: "beginning",
@@ -134,7 +136,7 @@ export const KINDS = {
     title: "Ride receipts", short: "Receipts", lag: 400, from: "head",
     init: () => ({ sent: 0, last: null }),
     apply(st, ev) { if (ev.type === "end") { st.sent++; st.last = ev; } return st; },
-    summary(st) { return [`${st.sent} receipts sent`, st.last ? `${st.last.rider}: ${st.last.minutes} min ride` : "only new rides"]; },
+    summary(st) { return [`${plural(st.sent, "receipt")} sent`, st.last ? `${st.last.rider}: ${st.last.minutes} min ride` : "only new rides"]; },
   },
 };
 export const SEARCH_V2 = searchV2;

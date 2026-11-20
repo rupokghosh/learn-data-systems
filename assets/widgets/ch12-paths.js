@@ -45,7 +45,7 @@ function update() {
   draw();
   const best = rows.reduce((a, b) => (b.perSecond < a.perSecond ? b : a));
   const fresh = rows.filter((r) => r.staleShare === 0).reduce((a, b) => (b.perSecond < a.perSecond ? b : a));
-  let msg = `At ${fmt(RATIOS[st.ratio])} page views per save, the least total work is <strong>${best.name.toLowerCase()}</strong> (${fmt(best.perSecond)} records per second).`;
+  let msg = `At ${fmt(RATIOS[st.ratio])} page view${RATIOS[st.ratio] === 1 ? "" : "s"} per save, the least total work is <strong>${best.name.toLowerCase()}</strong> (${fmt(best.perSecond)} records per second).`;
   if (best.staleShare > 0) msg += ` If every read must reflect every save, the cheapest exact option is ${fresh.name.toLowerCase()} at ${fmt(fresh.perSecond)}.`;
   if (d.key === "cache") msg += ` The cache gets more effective as reads grow, but it is the only design whose staleness is set by a timer instead of by how fast changes propagate.`;
   if (d.key === "push") msg += ` Pushing keeps open pages current without them asking, at the price of a connection per open page and work on every save even if nobody looks.`;
@@ -66,7 +66,9 @@ function draw(w = lastW) {
   const grid = el("g", { class: "grid" }, svg);
   for (const t of logTicks(10, 1e7)) {
     el("line", { x1: x(t), x2: x(t), y1: 4, y2: h - 22 }, grid);
-    el("text", { x: x(t), y: h - 6, "text-anchor": "middle" }, svg).textContent = fmt(t, 0);
+    // Keep the end labels inside the chart instead of clipping them at the edges.
+    const anchor = x(t) - 14 < 0 ? "start" : x(t) + 14 > w ? "end" : "middle";
+    el("text", { x: x(t), y: h - 6, "text-anchor": anchor }, svg).textContent = fmt(t, 0);
   }
   rows.forEach((r, i) => {
     const on = i === st.design;
@@ -77,7 +79,7 @@ function draw(w = lastW) {
     const end = x(Math.max(10, r.perSecond));
     el("rect", { x: labelW, y, width: Math.max(2, end - labelW), height: 18, rx: 3, style: `fill:${on ? "var(--accent)" : "var(--ink-3)"};opacity:${on ? 1 : 0.35}` }, svg);
     const inside = end > w - 64;
-    const v = el("text", { x: inside ? end - 6 : end + 6, y: y + 13, "text-anchor": inside ? "end" : "start", style: `font-family:var(--mono);font-size:11px;fill:${inside ? "var(--bg)" : "var(--ink)"}` }, svg);
+    const v = el("text", { x: inside ? end - 6 : end + 6, y: y + 13, "text-anchor": inside ? "end" : "start", style: `font-family:var(--mono);font-size:11px;fill:${inside && on ? "var(--bg)" : "var(--ink)"}` }, svg);
     v.textContent = fmt(r.perSecond) + "/s";
   });
 }

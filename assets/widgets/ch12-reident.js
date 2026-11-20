@@ -55,7 +55,7 @@ function update() {
     ? "With no attributes released, everyone hides among all 20,000 rows."
     : u === 0
       ? "Nobody is unique yet. Add a second attribute."
-      : `${(u * 100).toFixed(0)}% of people are the only row with their combination. Anyone who knows those few facts about them, from a social profile or a shared receipt, can find their row and read everything else in it.`;
+      : `${(u * 100).toFixed(u < 0.01 ? 1 : 0)}% of people are the only row with their combination. Anyone who knows those few facts about them, from a social profile or a shared receipt, can find their row and read everything else in it.`;
 }
 
 boxes.forEach((b) => b.addEventListener("change", update));

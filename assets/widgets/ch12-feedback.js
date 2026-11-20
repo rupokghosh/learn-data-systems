@@ -23,7 +23,10 @@ function update() {
   out("repay").textContent = `${pct(last[0].meanP)} / ${pct(last[1].meanP)}`;
   const delta = Math.round((gap1 - gap0) * 100);
   let msg;
+  // A gap can also close because Northgate collapses, not because Southmere catches up.
+  const northFell = last[0].rate < first[0].rate - 0.05;
   if (delta >= 5) msg = `The gap grew by ${delta} points in 20 rounds, although people in both neighbourhoods are equally likely to repay.`;
+  else if (delta <= -5 && northFell) msg = `The gap narrowed by ${-delta} points, but not because Southmere caught up: Northgate's approval rate fell too, from ${pct(first[0].rate)} to ${pct(last[0].rate)}.${st.learns ? " Counting every denied applicant as a non-payer drags down the weight of both areas." : ""}`;
   else if (delta <= -5) msg = st.explore > 0
     ? `The gap shrank by ${-delta} points. Trial loans let some Southmere applicants build the history the score was waiting for.`
     : `The gap narrowed by ${-delta} points, but only because newcomers with longer files moved in. Everyone denied in round 1 who stayed is still denied.`;
@@ -40,7 +43,7 @@ function draw(w = lastW) {
   lastW = w;
   if (!w || !res) return;
   const narrow = w < 480;
-  const h = 240, padL = 36, padR = narrow ? 44 : 100, padT = 10, padB = 26;
+  const h = 240, padL = 40, padR = narrow ? 44 : 100, padT = 10, padB = 26;
   const x = linear([1, res.length], [padL, w - padR]);
   const y = linear([0, 1], [h - padB, padT]);
   chart.innerHTML = "";

@@ -121,6 +121,10 @@ import { makeLoop, sleep } from "./ch10-util.js";
       v.val.textContent = show(s.value.get(n.id));
       v.g.classList.toggle("changed", changed.includes(n.id));
       v.g.classList.toggle("source", st.mode === "hops" && n.id === st.source);
+      // Vertices pick the source, which only exists in hops mode.
+      v.g.classList.toggle("static", st.mode !== "hops");
+      if (st.mode === "hops") { v.g.setAttribute("tabindex", 0); v.g.setAttribute("role", "button"); }
+      else { v.g.removeAttribute("tabindex"); v.g.removeAttribute("role"); }
       const mail = s.inbox.get(n.id)?.length || 0;
       v.inbox.textContent = mail ? `${mail} msg` : "";
     }
