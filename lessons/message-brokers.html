@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transmitting event streams · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch11.css">
+</head>
+<body data-lesson="message-brokers">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Transmitting event streams</h1>
+  </header>
+
+  <p>A batch job reads a finished, bounded input and produces an output some minutes or hours later. Most real data never finishes arriving, though. Players keep making moves, sensors keep reporting, customers keep paying. If you want results that are seconds old rather than a day old, you stop waiting for the input to end and process each piece as it appears. That piece is an <strong>event</strong>: a small, immutable record that something happened at a particular time.</p>
+
+  <h2>Producers, consumers, and topics</h2>
+  <p>An event is written once by a <strong>producer</strong> and read by any number of <strong>consumers</strong>. Related events are grouped into a <strong>topic</strong> (also called a stream).<span class="sidenote">A file or a database table could hold events too, but then consumers must poll. The more often they poll, the more each empty poll costs. Streaming systems instead notify consumers when something new arrives.</span> The open questions are how the event gets from one to the other, and what happens when the two sides do not run at the same speed.</p>
+  <p>The simplest answer is to send events directly. UDP multicast feeds in trading systems, brokerless libraries such as ZeroMQ, and webhooks (an HTTP call to a URL the consumer registered) all work this way. They are fast, but the application has to handle loss: if a consumer is offline when the event is sent, it misses it.</p>
+  <p>Whatever the transport, a producer that outpaces its consumer leaves only three choices:</p>
+  <div class="table-wrap"><table class="tradeoffs">
+    <tr><th>Strategy</th><th>What happens</th><th>Fits when</th></tr>
+    <tr><td>Drop</td><td>Excess events are discarded.</td><td>Only the latest value matters, such as a live gauge on a dashboard.</td></tr>
+    <tr><td>Buffer</td><td>Events wait in a queue, in memory or on disk.</td><td>Bursts are temporary and the buffer can outgrow them. You must decide what happens when it fills.</td></tr>
+    <tr><td>Backpressure</td><td>The producer is blocked until the consumer catches up.</td><td>The producer can afford to wait. TCP flow control and Unix pipes do this.</td></tr>
+  </table></div>
+  <p>A <strong>message broker</strong> is a server built to take the buffering job off both sides. Producers write to it and move on; consumers read from it at their own pace. Because the broker sits in the middle, clients can come and go, and the broker decides how durable the buffer is. There are two quite different designs.</p>
+
+  <h2>Brokers that delete what they deliver</h2>
+  <p>Traditional brokers such as RabbitMQ, ActiveMQ, and the cloud queue services follow the style of the AMQP and JMS standards. The broker pushes each message to a consumer and waits for an <strong>acknowledgement</strong>. Once acknowledged, the message is deleted. If the connection closes before the acknowledgement arrives, the broker assumes the work was not done and delivers the message again.</p>
+  <p>With several consumers on one queue, you choose between two patterns. <strong>Load balancing</strong> hands each message to one consumer, which spreads expensive work across workers. <strong>Fan-out</strong> gives every consumer its own copy, so independent systems can each react to the same event. The figure below lets you try both, and crash a worker mid-job.</p>
+
+  <figure class="widget" id="queue">
+    <p class="widget-title">A queue that forgets</p>
+    <p class="widget-sub">Press Play, then crash worker B while it holds an invoice. Watch where that invoice ends up in the completion order.</p>
+    <div class="btn-row">
+      <button class="btn" data-mode="balance" aria-pressed="true">Load balancing</button>
+      <button class="btn" data-mode="fanout" aria-pressed="false">Fan-out</button>
+      <span class="c11-sep" aria-hidden="true"></span>
+      <button class="btn primary" data-act="play">Play</button>
+      <button class="btn" data-act="step">Step</button>
+      <button class="btn" data-act="crash">Crash B</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div data-out="queue"></div>
+    <div class="legend"><span><i style="background:var(--accent-soft);border:1px solid var(--accent)"></i>in flight, not yet acknowledged</span><span><i style="background:var(--orange-soft);border:1px solid var(--orange)"></i>redelivered or out of order</span></div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>Two properties fall out of this design. First, order is not preserved under load balancing: a redelivered message is processed after messages that were sent later, which matters if a later message depends on an earlier one. You can avoid that only by giving each ordered stream its own queue with a single consumer. Second, the history is gone. Once a message is acknowledged, no new consumer can ever read it, so you cannot add a new system later and have it start from the beginning.</p>
+
+  <h2>Brokers built on a log</h2>
+  <p>A log-based broker, such as Apache Kafka, Amazon Kinesis Data Streams, or Apache Pulsar, keeps messages in an <strong>append-only log on disk</strong> and does not delete them when they are read. A producer appends to the end; a consumer reads sequentially and remembers how far it got. To scale beyond one machine, a topic is split into <strong>partitions</strong>, each an independent log on a different broker node. Every message in a partition gets a monotonically increasing <strong>offset</strong>.</p>
+  <p>Producers choose the partition by hashing a key, so all events with the same key land in the same partition and stay in order. Consumers that share work form a <strong>consumer group</strong>, and the broker assigns each partition to exactly one member of the group. Within a partition, messages are therefore processed one at a time, in order, by a single consumer.<span class="sidenote">The price is coarse parallelism: a group can use at most as many consumers as the topic has partitions, and one slow message holds up everything behind it in its partition.</span></p>
+  <p>Instead of acknowledging each message, a consumer periodically <strong>commits</strong> its offset per partition. If it crashes, the partition moves to another member, which resumes from the last committed offset. Anything processed after that commit is processed again.</p>
+
+  <figure class="widget" id="logbroker">
+    <p class="widget-title">A partitioned log with a consumer group</p>
+    <p class="widget-sub">Events from six game players are keyed by player name. Press Play, then slow down, crash, or add consumers.</p>
+    <div class="controls">
+      <div class="control"><label for="lb-rate">Producer rate <output></output></label><input id="lb-rate" type="range" min="0" max="4" step="0.5" value="1.5"></div>
+      <div class="control"><label for="lb-commit">Commit offsets every <output></output></label><input id="lb-commit" type="range" min="1" max="10" step="1" value="5"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" data-act="play">Play</button>
+      <button class="btn" data-act="step">Step</button>
+      <button class="btn" data-act="burst">Produce one event per player</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="c11-group" data-out="group"></div>
+    <div class="c11-log" data-out="log"></div>
+    <div class="legend">
+      <span><i class="k-swatch" style="background:var(--accent)"></i>pia</span><span><i class="k-swatch" style="background:var(--purple)"></i>lena</span>
+      <span><i class="k-swatch" style="background:var(--orange)"></i>mara</span><span><i class="k-swatch" style="background:var(--green)"></i>tess</span>
+      <span><i class="k-swatch" style="background:var(--red)"></i>ivo</span><span><i class="k-swatch" style="background:var(--ink-3)"></i>kit</span>
+    </div>
+    <div class="legend">
+      <span><i class="c11-l-line"></i>next offset the consumer reads</span>
+      <span><i class="c11-l-notch"></i>committed offset</span>
+      <span><i style="background:var(--accent-soft);border:1px solid var(--accent)"></i>processed, not committed</span>
+      <span><i style="background:var(--orange-soft);border:1px solid var(--orange)"></i>processed more than once</span>
+    </div>
+    <div class="c11-replay">
+      <div class="control"><label for="lb-seek">Reset the group's offsets to <output></output></label><input id="lb-seek" type="range" min="0" max="10" step="1" value="0"></div>
+      <button class="btn" data-act="seek">Replay from this offset</button>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Produced</div><div class="stat-value" data-stat="produced">0</div></div>
+      <div class="stat"><div class="stat-label">Processed</div><div class="stat-value" data-stat="processed">0</div></div>
+      <div class="stat"><div class="stat-label">Processed again</div><div class="stat-value" data-stat="again">0</div></div>
+      <div class="stat"><div class="stat-label">Total lag</div><div class="stat-value" data-stat="lag">0</div></div>
+    </div>
+    <div class="verdict"></div>
+    <figcaption>One tick processes one message per healthy consumer, or one every five ticks for a slow one. Each partition keeps its newest 30 messages.</figcaption>
+  </figure>
+
+  <p>Try committing every message and crashing a consumer: nothing is repeated, but you pay for a commit on every message. Commit every ten and the duplicate count jumps after each crash. This is why consumers of a log are said to get at-least-once delivery, and why their side effects should tolerate repeats, a theme the last lesson in this chapter returns to.</p>
+
+  <h2>Retention, lag, and replay</h2>
+  <p>The log cannot grow forever, so it is split into segments and old segments are deleted after a configured time or size. That makes the log a bounded buffer on disk. Disks are large: a few terabytes at typical write rates hold days or weeks of messages, which is far more slack than an in-memory queue can offer. A consumer that falls behind does not slow the producer or other consumers. It only slows itself, and the distance between its offset and the end of the log, its <strong>lag</strong>, is the number to alert on. If lag exceeds retention, the consumer skips messages it never saw.</p>
+  <p>Because reading does not delete anything, the consumer's offset is the only state that changes, and it is under your control. Move the offsets back and the group processes yesterday's messages again, into a new output, with new code. That turns reprocessing from a risky manual operation into an experiment you can run, compare, and throw away, much like rerunning a batch job.</p>
+  <div class="table-wrap"><table class="tradeoffs">
+    <tr><th></th><th>Queue that deletes on acknowledgement</th><th>Partitioned log</th></tr>
+    <tr><td>Unit of parallelism</td><td>Message: any free worker takes the next one</td><td>Partition: one consumer per partition in a group</td></tr>
+    <tr><td>Ordering</td><td>Lost under load balancing and redelivery</td><td>Kept within a partition</td></tr>
+    <tr><td>Progress tracking</td><td>Acknowledgement per message</td><td>One committed offset per partition</td></tr>
+    <tr><td>Slow message</td><td>Holds up only its worker</td><td>Holds up its whole partition</td></tr>
+    <tr><td>Reading old messages</td><td>Impossible once acknowledged</td><td>Seek to an older offset, within retention</td></tr>
+  </table></div>
+  <p>The rule of thumb follows directly. If messages are expensive, independent jobs where order does not matter, such as rendering invoices or resizing images, a traditional queue spreads the work best. If messages are a high-volume stream where order matters and you may want to add consumers or reprocess later, a partitioned log fits better.</p>
+
+  <p class="book-ref">In the book: Chapter 11, "Transmitting Event Streams" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch11-brokers.js"></script>
+</body>
+</html>

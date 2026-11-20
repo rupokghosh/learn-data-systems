@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stream joins and fault tolerance · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch11.css">
+</head>
+<body data-lesson="stream-joins-fault-tolerance">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Stream joins and fault tolerance</h1>
+  </header>
+
+  <p>Joins in a batch job are comfortable: both inputs are complete, so you can sort them, hash them, and match every record with every partner. A stream processor has no such luxury. New data can arrive on either side at any moment, which means the processor must keep <strong>state</strong> about what it has already seen in order to match it with what comes next. That state is also what makes recovering from a crash hard. This lesson covers the three kinds of stream join and then how a processor can crash, restart, and still produce each output exactly once in effect.</p>
+
+  <h2>Stream-table joins: enrichment</h2>
+  <p>The most common join adds context to each event. A coffee chain's purchase events carry only a member ID, and the loyalty service needs the member's tier to apply the right discount. Querying the members database for every purchase would work, but it is slow and can overload the database. Instead, the stream processor keeps a <strong>local copy of the table</strong>, in memory or in an embedded store such as RocksDB, and keeps it current by consuming the table's change stream through change data capture. The join then becomes a local lookup.</p>
+  <p>Now the processor reads two streams, purchases and table changes, and the order in which they reach it is not the order in which things happened. If a member is upgraded to gold a second before buying a coffee, but the change stream is running a few seconds behind, the purchase meets the old tier.</p>
+
+  <figure class="widget" id="enrich">
+    <p class="widget-title">Enriching purchases with a table that keeps changing</p>
+    <p class="widget-sub">Press Play to feed the processor arrivals one at a time. Then raise the change stream delay, or switch to a versioned join.</p>
+    <div class="btn-row">
+      <button class="btn" data-mode="latest" aria-pressed="true">Join with the latest table</button>
+      <button class="btn" data-mode="versioned" aria-pressed="false">Join with the version as of purchase time</button>
+    </div>
+    <div class="controls">
+      <div class="control"><label for="en-delay">Change stream delay <output></output></label><input id="en-delay" type="range" min="0" max="3" step="0.5" value="1.5"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" data-act="play">Play</button>
+      <button class="btn" data-act="step">Step</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="c11-split">
+      <div><p class="lane-label"><span>Arrivals, in processing order (seconds)</span></p><div class="c11-events tall" data-out="inputs"></div></div>
+      <div><p class="lane-label"><span>Processor's local copy of the members table</span></p><table class="c11-state" data-out="table"></table></div>
+    </div>
+    <p class="lane-label" style="margin-top:14px"><span>Enriched purchases (output)</span></p>
+    <div class="c11-join-out" data-out="results"></div>
+    <div class="verdict"></div>
+    <figcaption>Bronze members get no discount, silver 5%, gold 10%. Purchases reach the processor 0.3 s after they happen.</figcaption>
+  </figure>
+
+  <p>The latest-table join is fast and usually right, but its answer depends on timing, so rerunning the same input can produce different output. Data warehouses call this problem <strong>slowly changing dimensions</strong>, and the fix is the same in both worlds: give each version of a row its own identifier or validity interval, and join each event with the version that was valid at its event time. In a stream processor that means keeping table history and holding events until the change stream is known to have passed their timestamp. You trade latency and memory for determinism.</p>
+
+  <h2>Stream-stream joins: matching within a window</h2>
+  <p>Sometimes both sides are event streams. A news app sends push notifications and wants to know which app opens they caused. An open counts for a notification only if it happens within some window after the send. To join them, the processor indexes recent notifications by ID, and when an open arrives, it looks for the matching notification. When a notification's window expires without an open, the processor can emit a "notification ignored" event, which is often the more interesting result.</p>
+
+  <figure class="widget" id="wjoin">
+    <p class="widget-title">Attributing app opens to notifications</p>
+    <p class="widget-sub">Drag the window. Green lines are credited opens; hollow dots are unmatched on either side.</p>
+    <div class="controls">
+      <div class="control"><label for="wj-win">Attribution window <output></output></label><input id="wj-win" type="range" min="1" max="45" step="1" value="10"></div>
+    </div>
+    <div class="chart"></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Opens credited</div><div class="stat-value" data-stat="pairs">0</div></div>
+      <div class="stat"><div class="stat-label">Opens not credited</div><div class="stat-value" data-stat="orphans">0</div></div>
+      <div class="stat"><div class="stat-label">Notifications ignored</div><div class="stat-value" data-stat="ignored">0</div></div>
+      <div class="stat"><div class="stat-label">Peak notifications in state</div><div class="stat-value" data-stat="peak">0</div></div>
+    </div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>The window size is a business decision with an engineering cost. It sets how much state the processor must hold, which in production is per user and per notification, so a window ten times longer means roughly ten times the state. It also sets how long you wait before you can say anything happened: "no open" is only known once the window closes.</p>
+
+  <h2>Table-table joins: maintaining a view</h2>
+  <p>When both inputs are change streams of tables, the output is itself a table: a materialized view of the join, kept current. Picture a podcast app that shows each listener a queue of new episodes from the shows they follow. One input is the change stream of the follows table, the other the change stream of the episodes table. The processor keeps both tables locally and applies a rule for each kind of change:</p>
+<pre><code>new episode of show S      → add it to the queue of every follower of S
+listener L follows show S  → add S's recent episodes to L's queue
+listener L unfollows S     → remove S's episodes from L's queue
+episode deleted            → remove it from every queue</code></pre>
+  <p>This is the same calculation as a SQL join of the two tables, but performed incrementally: each input change produces exactly the changes to the result that it implies. Kafka Streams expresses this directly as a join between two KTables. As with the other joins, if the two change streams are not ordered with respect to each other, the result for a given moment depends on which change arrived first.</p>
+
+  <h2>Fault tolerance and exactly-once effects</h2>
+  <p>A batch job that fails can simply be rerun, because its input is fixed and its output is only published when the job succeeds. A stream never finishes, so you cannot wait for the end before making output visible. Stream processors use two related tricks to get a similar guarantee. <strong>Microbatching</strong>, as in Spark Streaming, cuts the stream into small batches of about a second and treats each as a tiny batch job. <strong>Checkpointing</strong>, as in Apache Flink, periodically writes a consistent snapshot of all operator state to durable storage, coordinated by barrier markers that flow through the stream; after a crash, everything restarts from the last checkpoint.</p>
+  <p>Both guarantee that the processor's internal state reflects each input exactly once. Neither can unsend an email or take back a row written to an external database before the crash. The figure shows the problem with a consumer that credits loyalty points for each message: it writes the output and records progress by committing its offset, and a crash can land between the two.</p>
+
+  <figure class="widget" id="crash">
+    <p class="widget-title">Crash between the write and the commit</p>
+    <p class="widget-sub">Pick a strategy, press Play, then press Crash partway through a batch. The consumer restarts from its committed offset.</p>
+    <div class="btn-row">
+      <button class="btn" data-strategy="before" aria-pressed="false">Commit, then write</button>
+      <button class="btn" data-strategy="after" aria-pressed="true">Write, then commit</button>
+      <button class="btn" data-strategy="idempotent" aria-pressed="false">Idempotent writes</button>
+      <button class="btn" data-strategy="atomic" aria-pressed="false">Atomic transaction</button>
+    </div>
+    <div class="controls">
+      <div class="control"><label for="cr-batch">Commit every <output></output></label><input id="cr-batch" type="range" min="1" max="4" step="1" value="3"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" data-act="play">Play</button>
+      <button class="btn" data-act="step">Step</button>
+      <button class="btn" data-act="crash">Crash now</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <p class="lane-label"><span>Input partition</span><span data-out="pos"></span></p>
+    <div class="lane" data-out="input"></div>
+    <div class="c11-split" style="margin-top:6px">
+      <div><p class="lane-label"><span>Consumer steps</span></p><ol class="c11-ops" data-out="ops"></ol></div>
+      <div><p class="lane-label"><span>Points ledger (the output)</span></p><div class="lane c11-sink" data-out="sink"></div></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Ledger rows</div><div class="stat-value" data-stat="rows">0</div></div>
+      <div class="stat"><div class="stat-label">Duplicates</div><div class="stat-value" data-stat="dup">0</div></div>
+      <div class="stat"><div class="stat-label">Lost</div><div class="stat-value" data-stat="lost">0</div></div>
+      <div class="stat"><div class="stat-label">Points: balance / expected</div><div class="stat-value sm" data-stat="balance">0</div></div>
+    </div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>Committing first loses messages; writing first duplicates them. There are two ways out. The first is <strong>atomic commit</strong>: make the output and the offset part of one transaction, so that either both become visible or neither does. Kafka transactions do this when the output is another Kafka topic, and you can do it yourself when the output is a relational database by storing the consumer's offsets in a table of that same database. The second is <strong>idempotence</strong>: make repeating a write harmless. Store the message's offset with the row and upsert on it, or keep the offset of the last applied message per key and skip anything older.<span class="sidenote">Idempotence has preconditions: messages must be replayed in the same order, processing must be deterministic, and no other writer may update the same rows concurrently. A zombie instance that was declared dead but is still running needs fencing.</span></p>
+  <p>Finally, state must survive the crash too. A processor that keeps a local table or window contents can write them to a remote store, which is slow; replicate them as a changelog topic, as Kafka Streams does; or snapshot them with each checkpoint, as Flink does to HDFS or S3. For small windows it is sometimes cheapest to rebuild state by replaying the last few minutes of input. Which to pick depends on how large the state is, how fast you need to recover, and whether your network or your disks are the scarcer resource.</p>
+
+  <p class="book-ref">In the book: Chapter 11, "Stream Joins" and "Fault Tolerance" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch11-joins.js"></script>
+</body>
+</html>

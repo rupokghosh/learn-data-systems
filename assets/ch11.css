@@ -1,0 +1,150 @@
+/* =========================================================
+   Chapter 11: stream processing visuals.
+   Loaded after style.css. Colors only via its variables.
+   ========================================================= */
+
+/* ---------- Shared bits ---------- */
+.c11-empty::after { content: "empty"; font: 12px var(--sans); color: var(--ink-4); align-self: center; padding: 0 4px; }
+.rec.dead-soft { color: var(--ink-3); background: var(--surface-2); border-color: var(--line); }
+.rec.bad { background: var(--red-soft); border-color: var(--red); color: var(--ink); }
+.rec.good { background: var(--green-soft); border-color: var(--green); }
+.rec.enter { transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out), background-color 200ms ease, border-color 200ms ease;
+  @starting-style { opacity: 0; transform: translateY(5px); } }
+.c11-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 20px; align-items: start; }
+@media (max-width: 560px) { .c11-split { grid-template-columns: minmax(0, 1fr); } }
+.c11-sep { display: inline-block; width: 1px; height: 20px; background: var(--line-2); margin: 0 4px; }
+
+/* ---------- Lesson 1: partitioned log ---------- */
+.c11-group { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; align-items: center; }
+.c11-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 3px 3px 10px; border: 1px solid var(--line-2); border-radius: 8px; font: 13px/1.2 var(--sans); transition: border-color 200ms ease; }
+.c11-chip.slow { border-color: var(--orange); }
+.c11-chip-name { font-weight: 500; color: var(--ink); }
+.c11-chip-sub { color: var(--ink-3); font-size: 12px; margin-right: 2px; }
+.c11-chip .btn { height: 26px; padding: 0 9px; font-size: 12px; }
+.c11-log { border-top: 1px solid var(--line); }
+.c11-prow { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 8px; align-items: start; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.c11-plabel { display: flex; flex-direction: column; font: 12px/1.35 var(--sans); color: var(--ink-3); padding-top: 3px; font-variant-numeric: tabular-nums; }
+.c11-plabel strong { font-weight: 500; color: var(--ink); font-size: 13px; }
+.c11-plabel .warn { color: var(--orange); }
+.c11-track { position: relative; height: 54px; overflow: hidden; }
+.c11-cell {
+  position: absolute; left: 0; top: 3px; width: 25px; height: 32px; border: 1px solid var(--line-2); border-radius: 4px; background: var(--bg);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  font: 500 11px/1 var(--mono); color: var(--ink); box-shadow: inset 0 3px 0 var(--kc);
+  transition: transform 300ms var(--ease-in-out), background-color 200ms ease, border-color 200ms ease, opacity 250ms var(--ease-out);
+  @starting-style { opacity: 0; }
+}
+.c11-cell .o { font: 9px/1 var(--sans); color: var(--ink-4); margin-top: 2px; }
+.c11-cell.done { background: var(--surface-2); color: var(--ink-3); border-color: var(--line); }
+.c11-cell.inflight { background: var(--accent-soft); border-color: var(--accent); }
+.c11-cell.again { background: var(--orange-soft); border-color: var(--orange); }
+.c11-cursor { position: absolute; left: 0; top: 0; width: 2px; height: 38px; background: var(--accent); transition: transform 300ms var(--ease-in-out); }
+.c11-cursor span { position: absolute; top: 39px; left: 5px; font: 500 11px/1 var(--sans); color: var(--accent); white-space: nowrap; }
+.c11-cursor.off { background: var(--ink-4); }
+.c11-commit { position: absolute; left: -4px; top: 39px; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 8px solid var(--green); transition: transform 300ms var(--ease-in-out); }
+.c11-behind { position: absolute; right: 0; top: 39px; font: 11px/1 var(--sans); color: var(--orange); background: var(--bg); padding-left: 4px; }
+.c11-replay { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-end; margin-top: 14px; }
+.c11-replay .control { flex: 1 1 200px; }
+.legend i.k-swatch { height: 4px; width: 14px; }
+.legend i.c11-l-line { width: 2px; height: 12px; border-radius: 0; background: var(--accent); }
+.legend i.c11-l-notch { width: 0; height: 0; border-radius: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 8px solid var(--green); }
+
+/* Traditional queue */
+.c11-workers { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 16px; }
+@media (max-width: 480px) { .c11-workers { grid-template-columns: minmax(0, 1fr); } }
+.c11-worker .lane { min-height: 40px; transition: background-color 200ms ease, border-color 200ms ease; }
+.c11-worker.dead .lane { border-style: solid; border-color: var(--red); background: var(--red-soft); }
+.c11-worker.dead .lane-label span:last-child { color: var(--red); }
+
+/* ---------- Lesson 2: space-time diagram and event log ---------- */
+.c11-st text { font: 12px var(--sans); fill: var(--ink-3); }
+.c11-st .lane-name { font: 500 12.5px var(--sans); fill: var(--ink); }
+.c11-st .axis { stroke: var(--line-2); stroke-width: 1; }
+.c11-st .msg { stroke-width: 1.6; fill: none; }
+.c11-st .msg.a { stroke: var(--accent); }
+.c11-st .msg.b { stroke: var(--orange); }
+.c11-st .msg.cdc { stroke: var(--purple); }
+.c11-st .msg.ack { stroke: var(--ink-4); stroke-dasharray: 3 3; }
+.c11-st .lbl { font: 500 11px var(--mono); paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; }
+.c11-st .val { paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; }
+.c11-st .lbl.a { fill: var(--accent); }
+.c11-st .lbl.b { fill: var(--orange); }
+.c11-st .lbl.cdc { fill: var(--purple); }
+.c11-st .val { font: 500 12px var(--mono); fill: var(--ink); }
+.c11-st .playhead { stroke: var(--ink-4); stroke-width: 1; stroke-dasharray: 2 4; }
+.c11-st .box { fill: var(--surface-2); stroke: var(--line-2); }
+.c11-st .box.bad { fill: var(--red-soft); stroke: var(--red); }
+.c11-st .box.good { fill: var(--green-soft); stroke: var(--green); }
+.c11-mode-note { font: 13px/1.5 var(--sans); color: var(--ink-3); margin: -4px 0 12px; }
+
+.c11-evbtns { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.c11-events { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow-y: auto; padding: 8px; border: 1px dashed var(--line-2); border-radius: 6px; }
+.c11-events.tall { max-height: none; overflow: visible; }
+.c11-ev { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 6px; align-items: baseline; font: 12px/1.35 var(--mono); color: var(--ink-2); padding: 3px 4px; border-radius: 4px;
+  transition: opacity 200ms ease, background-color 200ms ease; }
+.c11-ev .n { color: var(--ink-4); font-size: 11px; text-align: right; }
+.c11-ev .t { color: var(--ink); font-weight: 500; }
+.c11-ev.future { opacity: 0.3; }
+.c11-ev.cur { background: var(--accent-soft); }
+.c11-ev.enter { transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out), background-color 200ms ease; @starting-style { opacity: 0; transform: translateY(5px); } }
+table.c11-state { width: 100%; border-collapse: collapse; font: 12.5px/1.35 var(--sans); }
+.c11-state th, .c11-state td { text-align: left; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.c11-state th { font-weight: 500; color: var(--ink-3); font-size: 11.5px; border-bottom-color: var(--line-2); }
+.c11-state td { color: var(--ink-2); transition: background-color 200ms ease; }
+.c11-state td:first-child { font-family: var(--mono); color: var(--ink); }
+.c11-state tr.changed td { background: var(--accent-soft); }
+.c11-state .muted { color: var(--ink-4); }
+.c11-compact .rec { font-size: 11px; }
+.c11-compact .rec.gone { opacity: 0.3; text-decoration: line-through; }
+
+/* ---------- Lesson 3: windowing lab ---------- */
+.c11-lab text { font: 11px var(--sans); fill: var(--ink-3); font-variant-numeric: tabular-nums; }
+.c11-lab .title { font: 500 12px var(--sans); fill: var(--ink); paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; }
+.c11-lab .axis { stroke: var(--line-2); }
+.c11-lab .tick { stroke: var(--line); }
+.c11-lab .link { stroke: var(--line-2); stroke-width: 1; }
+.c11-lab .link.late { stroke: var(--orange); stroke-opacity: 0.6; }
+.c11-lab .ev { fill: var(--accent); }
+.c11-lab .ev.unseen { fill: var(--ink-4); fill-opacity: 0.35; }
+.c11-lab .ev.dropped { fill: var(--red); }
+.c11-lab .ev.corr { fill: var(--orange); }
+.c11-lab .win { fill: var(--surface-2); stroke: var(--line-2); }
+.c11-lab .win.fired { fill: var(--accent-soft); stroke: var(--accent); }
+.c11-lab .win.corrected { fill: var(--orange-soft); stroke: var(--orange); }
+.c11-lab .outage { fill: var(--red-soft); }
+.c11-lab .wm { stroke: var(--green); stroke-width: 2; }
+.c11-lab .wmlbl { fill: var(--green); font-weight: 500; }
+.c11-lab .now { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 3; }
+.c11-lab .bar { fill: var(--accent); }
+.c11-lab .bar.corr { fill: var(--orange); }
+.c11-lab .truth { stroke: var(--ink); stroke-width: 2; }
+.c11-lab .curve { fill: none; stroke-width: 1.6; }
+.c11-lab .curve.truth-c { stroke: var(--ink-3); stroke-dasharray: 4 3; }
+.c11-lab .curve.got { stroke: var(--accent); }
+.legend i.c11-l-truth { height: 2px; background: var(--ink); border-radius: 0; }
+
+/* ---------- Lesson 4: joins and fault tolerance ---------- */
+.c11-join-out { display: flex; flex-direction: column; gap: 4px; }
+.c11-jrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font: 12.5px/1.4 var(--sans); color: var(--ink-3); }
+.c11-jrow.enter { transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out); @starting-style { opacity: 0; transform: translateY(5px); } }
+.c11-tbl td.flash { background: var(--accent-soft); }
+.c11-ff text { font: 11px var(--sans); fill: var(--ink-3); }
+.c11-ff .title { font: 500 12px var(--sans); fill: var(--ink); }
+.c11-ff .axis { stroke: var(--line-2); }
+.c11-ff .ev { fill: var(--accent); }
+.c11-ff .ev.open { fill: var(--orange); }
+.c11-ff .ev.miss { fill: var(--bg); stroke: var(--ink-3); stroke-width: 1.5; }
+.c11-ff .pair { stroke: var(--green); stroke-width: 1.6; }
+.c11-ff .span { fill: var(--accent-soft); }
+.c11-ff .span.miss { fill: var(--surface-2); }
+
+.c11-ops { list-style: none; margin: 0; padding: 0; font: 13px/1.45 var(--sans); }
+.c11-ops li { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; padding: 3px 6px; border-radius: 4px; color: var(--ink-3); margin: 0; transition: background-color 150ms ease, color 150ms ease; }
+.c11-ops li .w { font: 11px/1.6 var(--mono); color: var(--ink-4); }
+.c11-ops li.done { color: var(--ink-2); }
+.c11-ops li.cur { background: var(--accent-soft); color: var(--ink); }
+.c11-ops li.lost { color: var(--red); text-decoration: line-through; }
+.c11-ops li.crash { color: var(--red); font-weight: 500; }
+.c11-ops li.restart { color: var(--green); }
+.c11-sink .rec { font-size: 11px; }
+.c11-sink .rec.pending { border-style: dashed; color: var(--ink-3); }

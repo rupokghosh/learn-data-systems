@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Databases and streams · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch11.css">
+</head>
+<body data-lesson="change-data-capture">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Databases and streams</h1>
+  </header>
+
+  <p>A real application rarely keeps its data in one place. The same holiday-rental listing lives as a row in PostgreSQL, a document in Elasticsearch so guests can search for it, an entry in a Redis cache so the page loads quickly, and a row in the warehouse so analysts can study prices. Only one of those is the <strong>system of record</strong>. The rest are <strong>derived data</strong>, and each must hear about every change to the original. This lesson is about how that news travels, and why the answer that looks simplest is the one that breaks.</p>
+
+  <h2>Why dual writes go wrong</h2>
+  <p>The obvious approach is for application code to update every system itself: write the database, then write the search index, then invalidate the cache. This is called a <strong>dual write</strong>. It has two problems. The first is partial failure: if the database write succeeds and the index write fails, the two disagree, and making both succeed or neither would need an atomic commit across different products. The second problem is subtler and happens even when every write succeeds. In the figure, two hosts change the nightly price of the same listing at almost the same moment.</p>
+
+  <figure class="widget" id="race">
+    <p class="widget-title">Two clients, two systems, one listing</p>
+    <p class="widget-sub">Drag the delay, then switch to change data capture and press Run again.</p>
+    <div class="btn-row">
+      <button class="btn" data-mode="dual" aria-pressed="true">Dual writes</button>
+      <button class="btn" data-mode="cdc" aria-pressed="false">Change data capture</button>
+      <span class="c11-sep" aria-hidden="true"></span>
+      <button class="btn primary" data-act="run">Run</button>
+    </div>
+    <p class="c11-mode-note"></p>
+    <div class="controls">
+      <div class="control"><label for="race-delay">Delay before the first write reaches the index <output></output></label><input id="race-delay" type="range" min="10" max="200" step="5" value="140"></div>
+    </div>
+    <div class="scroll-x">
+      <svg viewBox="0 0 640 286" role="img" aria-label="Space-time diagram. Client A and client B each send a price update to the database and to the search index. Arrows show when each write leaves and arrives."></svg>
+    </div>
+    <div class="legend"><span><i style="background:var(--accent)"></i>client A sets 120</span><span><i style="background:var(--orange)"></i>client B sets 95</span><span><i style="background:var(--purple)"></i>log entry shipped by the connector</span><span><i style="background:var(--ink-4)"></i>acknowledgement</span></div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>Each client did its two writes in the right order. The database saw A then B. A slow network path meant the index saw B then A. Last write wins in both places, so the winners differ. No component reports an error, and the inconsistency is permanent until the next update to that listing. You could add locks or version checks, but you would be building a distributed transaction protocol by hand across systems that were never designed to take part in one.</p>
+
+  <h2>Change data capture</h2>
+  <p>The fix is to stop having many writers. Let the application write only to the database, and let every other system follow the database's own record of what changed, in the order the database applied it. Every database already keeps such a record for replication: the MySQL binlog, the PostgreSQL write-ahead log, the MongoDB oplog. <strong>Change data capture</strong> (CDC) reads that log and publishes each change as an event, usually into a log-based broker such as Kafka. Debezium does this for several databases, and Kafka Connect moves the events into search indexes, caches, and warehouses.</p>
+  <p>This makes the database the leader and every derived system a follower. Followers can lag, because CDC is asynchronous, but they cannot disagree about order. A connector that is slow only delays the index; it cannot apply change 2 before change 1. Adding a new derived system is also easier, because it does not require touching the application code that writes.</p>
+  <p>A new follower needs a starting point, since the log usually does not reach back to the beginning of time. It takes a <strong>consistent snapshot</strong> of the database together with the exact log position the snapshot corresponds to, loads the snapshot, then applies the log from that position onward.<span class="sidenote">Without the matching position you cannot tell which changes are already in the snapshot, and you either miss some or apply some twice.</span></p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 150" role="img" aria-label="A log of changes from position 1 to 9. A snapshot taken at position 6 is loaded into a new search index, then the log from position 7 onward is applied.">
+      <text x="0" y="16" class="diagram-label">Database change log</text>
+      <g style="font:500 11px var(--mono)">
+        <rect x="0" y="28" width="58" height="30" rx="4" style="fill:var(--surface-2);stroke:var(--line-2)"/><text x="29" y="47" text-anchor="middle" style="fill:var(--ink-3)">1</text>
+        <rect x="64" y="28" width="58" height="30" rx="4" style="fill:var(--surface-2);stroke:var(--line-2)"/><text x="93" y="47" text-anchor="middle" style="fill:var(--ink-3)">2</text>
+        <rect x="128" y="28" width="58" height="30" rx="4" style="fill:var(--surface-2);stroke:var(--line-2)"/><text x="157" y="47" text-anchor="middle" style="fill:var(--ink-3)">3</text>
+        <rect x="192" y="28" width="58" height="30" rx="4" style="fill:var(--surface-2);stroke:var(--line-2)"/><text x="221" y="47" text-anchor="middle" style="fill:var(--ink-3)">4</text>
+        <rect x="256" y="28" width="58" height="30" rx="4" style="fill:var(--surface-2);stroke:var(--line-2)"/><text x="285" y="47" text-anchor="middle" style="fill:var(--ink-3)">5</text>
+        <rect x="320" y="28" width="58" height="30" rx="4" style="fill:var(--surface-2);stroke:var(--line-2)"/><text x="349" y="47" text-anchor="middle" style="fill:var(--ink-3)">6</text>
+        <rect x="384" y="28" width="58" height="30" rx="4" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="413" y="47" text-anchor="middle" style="fill:var(--ink)">7</text>
+        <rect x="448" y="28" width="58" height="30" rx="4" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="477" y="47" text-anchor="middle" style="fill:var(--ink)">8</text>
+        <rect x="512" y="28" width="58" height="30" rx="4" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="541" y="47" text-anchor="middle" style="fill:var(--ink)">9</text>
+      </g>
+      <line x1="381" y1="20" x2="381" y2="66" style="stroke:var(--orange);stroke-width:2"/>
+      <text x="376" y="78" text-anchor="end" style="fill:var(--orange);font:500 11px var(--sans)">snapshot taken here, at position 6</text>
+      <g class="dg-node"><rect x="120" y="98" width="180" height="44" rx="8"/><text x="134" y="117">1. Load the snapshot</text><text x="134" y="133" class="sub">state as of position 6</text></g>
+      <g class="dg-node active"><rect x="384" y="98" width="186" height="44" rx="8"/><text x="398" y="117">2. Apply 7, 8, 9, ...</text><text x="398" y="133" class="sub">then keep following the log</text></g>
+      <line x1="302" y1="120" x2="378" y2="120" class="dg-edge"/>
+    </svg>
+    </div>
+  </figure>
+
+  <p>Some brokers remove the need for a separate snapshot. With <strong>log compaction</strong>, the broker periodically throws away any record for which a newer record with the same key exists. A deletion is written as a <strong>tombstone</strong>, a record with a null value, which compaction eventually removes along with everything before it. What remains is one record per live key, so the compacted log is no larger than the database itself, and a consumer that reads it from offset zero ends up with a full copy. Kafka supports this per topic.</p>
+
+  <h2>Event sourcing</h2>
+  <p><strong>Event sourcing</strong> starts from the same log, but higher up. In CDC, the application mutates rows as usual and the log is extracted from the database afterwards. Its entries are low-level: "row 88, column price, now 95". In event sourcing, the application itself records what happened as immutable events in the language of the domain, "parcel scanned at the Arnhem depot", and treats those events as the source of truth. Any table you query is derived from them.</p>
+  <p>The distinction between a request and a fact matters here. A user's request starts as a <strong>command</strong>, which may fail: you cannot deliver a parcel that is not on a van. The system validates the command against the current state, and only if it passes does it become an <strong>event</strong>. From then on the event is a fact. A later correction is a new event, not an edit.</p>
+
+  <figure class="widget" id="parcels">
+    <p class="widget-title">A parcel tracker built on an event log</p>
+    <p class="widget-sub">Pick a parcel and issue commands. Drag the replay slider to see the state at any point. Then compact the change stream.</p>
+    <div class="btn-row">
+      <button class="btn" data-parcel="PX-101" aria-pressed="true">PX-101</button>
+      <button class="btn" data-parcel="PX-102" aria-pressed="false">PX-102</button>
+      <button class="btn" data-parcel="PX-103" aria-pressed="false">PX-103</button>
+    </div>
+    <div class="c11-evbtns">
+      <button class="btn" data-cmd="Scanned">Scan at next depot</button>
+      <button class="btn" data-cmd="OutForDelivery">Out for delivery</button>
+      <button class="btn" data-cmd="AttemptFailed">Attempt failed</button>
+      <button class="btn" data-cmd="Delivered">Delivered</button>
+      <button class="btn" data-act="erase">Erase on request</button>
+    </div>
+    <div class="c11-split">
+      <div><p class="lane-label"><span>Event log, append-only</span></p><div class="c11-events" data-out="events"></div></div>
+      <div><p class="lane-label"><span>Current state, derived by replay</span></p><table class="c11-state" data-out="state"></table></div>
+    </div>
+    <div class="controls" style="margin-top:14px">
+      <div class="control"><label for="pk-upto">Replay the first <output></output></label><input id="pk-upto" type="range" min="0" max="7" step="1" value="7"></div>
+    </div>
+    <p class="lane-label"><span>Change stream of the parcels table, as CDC would emit it</span></p>
+    <div class="lane c11-compact" data-out="changelog"></div>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn" data-act="compact" aria-pressed="false">Compact the change stream</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Events in the log</div><div class="stat-value" data-stat="events">0</div></div>
+      <div class="stat"><div class="stat-label">Change records</div><div class="stat-value" data-stat="changes">0</div></div>
+      <div class="stat"><div class="stat-label">Kept by compaction</div><div class="stat-value" data-stat="kept">0</div></div>
+    </div>
+    <div class="verdict"></div>
+  </figure>
+
+  <h2>State is a fold over the log</h2>
+  <p>The table in the figure is never written directly. It is the result of starting from nothing and applying each event in turn, a left fold:</p>
+<pre><code>const state = events.reduce(apply, new Map());
+// apply(state, event) returns the state after that one event</code></pre>
+  <p>Seen this way, a database table and a change stream are two views of the same thing. The table is what you get by applying every change up to now; the stream is the sequence of differences between one version of the table and the next. Mutable state is convenient for reading, and an append-only log is what actually happened. Keeping the log as the source of truth brings concrete benefits:</p>
+  <ul>
+    <li><strong>Auditing and debugging.</strong> If a bad deploy corrupts derived data, you fix the code and replay. Nothing was overwritten, so nothing is lost. Accountants have kept ledgers this way for centuries.</li>
+    <li><strong>Several read models from one history.</strong> The same events can build a status table for the tracking page, a per-depot workload view, and a search index, each shaped for its queries. Separating the write format from the read formats is often called command query responsibility segregation (CQRS).</li>
+    <li><strong>Easier evolution.</strong> A new view can be built alongside the old one from the same events, and the old one retired when the new one is ready.</li>
+  </ul>
+  <p>The limits are just as concrete. A dataset with heavy churn on a small number of keys produces a log far larger than its current state, and an event log, unlike a CDC change stream, cannot simply be compacted, because older events carry meaning the newest one does not. Systems therefore store periodic snapshots of the derived state to speed up recovery, while keeping the full log.<span class="sidenote">Snapshots here are only an optimization: the log remains the source of truth and the snapshot can always be rebuilt from it.</span></p>
+  <p>Deletion is the hardest case. Privacy law such as the GDPR may require that a person's data be erased, and appending an "erased" event does not remove the address stored in earlier events. You have to rewrite history (Datomic calls this excision), or keep personal data outside the log and store only a reference to it, or encrypt it with a per-person key that you destroy on request. Even then, copies in backups and derived systems must be tracked down. Design for deletion before you commit to an immutable log, not after the first request arrives.</p>
+
+  <p class="book-ref">In the book: Chapter 11, "Databases and Streams" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch11-cdc.js"></script>
+</body>
+</html>

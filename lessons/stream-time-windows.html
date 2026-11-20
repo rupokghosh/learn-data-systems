@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reasoning about time · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch11.css">
+</head>
+<body data-lesson="stream-time-windows">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Reasoning about time</h1>
+  </header>
+
+  <p>Once events are flowing through a broker, something has to consume them. A stream processor reads one or more input streams and does one of three things with what it computes: writes it to a store that others query, pushes it to a person as an alert or a dashboard update, or emits it as another stream for the next processor. Most of the interesting ones aggregate over time, and that is where things get subtle, because a stream has two clocks and they rarely agree.</p>
+
+  <h2>What stream processors are for</h2>
+  <p><strong>Complex event processing</strong> (CEP) systems such as Esper let you register a pattern, and they emit a match when the stream contains it. A stadium might watch for the same ticket barcode accepted at two different gates within a minute, a sign of a copied ticket. The usual relationship between data and query is inverted: the queries are stored for a long time, and the events flow past them.</p>
+  <p><strong>Stream analytics</strong> cares less about specific sequences and more about aggregates: scans per minute at each gate, the 99th percentile of checkout latency over the last five minutes, a rolling average compared with last week. Apache Flink, Kafka Streams, and Spark Structured Streaming are built for this. Some analytics use probabilistic structures, such as HyperLogLog for counting distinct visitors, which trade a small, known error for a large saving in memory.</p>
+  <p>Two other uses come up constantly. <strong>Maintaining materialized views</strong>, such as keeping a cache or search index up to date from a change stream, is stream processing even though nobody calls it analytics. And <strong>search on streams</strong> stores queries instead of documents: a saved search for "two-bedroom flat under 1,500 near the river" is matched against each new listing as it arrives. Elasticsearch's percolator feature works this way.</p>
+
+  <h2>Event time versus processing time</h2>
+  <p>Every event has an <strong>event time</strong>, when it actually happened, and a <strong>processing time</strong>, when the stream processor gets to it. Normally the gap is milliseconds. But a phone may queue events while offline, a broker may hold a backlog while a consumer is redeployed, and a processor that restarts after a crash reads minutes of buffered events in a burst.<span class="sidenote">Reprocessing old data is the extreme case: events from last month are processed today. A computation that uses processing time cannot produce the same answer twice.</span></p>
+  <p>If you window by processing time, those delays become fiction in your output. A three-minute outage of the processor shows up as three minutes of zero traffic followed by a spike that never happened. Windowing by event time is correct, but raises a new question: since events can arrive late, when do you know a window is finished?</p>
+
+  <h2>Windows and stragglers</h2>
+  <p>There are four common shapes of window:</p>
+  <div class="table-wrap"><table class="tradeoffs">
+    <tr><th>Window</th><th>Definition</th><th>Typical use</th></tr>
+    <tr><td>Tumbling</td><td>Fixed length, back to back, no overlap. Every event belongs to exactly one.</td><td>Scans per minute.</td></tr>
+    <tr><td>Hopping</td><td>Fixed length, starting every hop, so consecutive windows overlap.</td><td>A five-minute average updated every minute.</td></tr>
+    <tr><td>Sliding</td><td>All events within a fixed interval of each other, however they line up with the clock.</td><td>"More than 30 scans within any 10 seconds."</td></tr>
+    <tr><td>Session</td><td>No fixed length. A window grows while events keep coming and closes after a gap of inactivity.</td><td>A visitor's browsing session.</td></tr>
+  </table></div>
+  <p>Whatever the shape, an event-time window can only be published once you believe no more events for it will arrive. You can never be sure: a scanner may have been offline for an hour. Processors track a <strong>watermark</strong>, an estimate of how far event time has progressed, commonly the largest event time seen so far minus an allowed lag. When the watermark passes the end of a window, the window is published. Events that turn up after that are <strong>stragglers</strong>, and you have two options. You can drop them, and perhaps count how many you dropped so you notice when it becomes a lot. Or you can publish a <strong>correction</strong>, an updated value for a window you already emitted, which only works if downstream systems can overwrite earlier results.</p>
+  <p>The lab below runs about 120 ticket scans at a stadium's gates through a counting job. Most arrive within a couple of seconds. Some come from scanners that lost their connection and upload much later.</p>
+
+  <figure class="widget" id="winlab">
+    <p class="widget-title">Windowing lab</p>
+    <p class="widget-sub">Each dot is one scan, shown at its event time (top) and processing time (bottom). Change the settings, or press Play to watch the processor work through the stream.</p>
+    <div class="btn-row">
+      <button class="btn" data-type="tumbling" aria-pressed="true">Tumbling</button>
+      <button class="btn" data-type="hopping" aria-pressed="false">Hopping</button>
+      <button class="btn" data-type="sliding" aria-pressed="false">Sliding</button>
+      <button class="btn" data-type="session" aria-pressed="false">Session</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn" data-by="event" aria-pressed="true">Window by event time</button>
+      <button class="btn" data-by="processing" aria-pressed="false">Window by processing time</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn" data-policy="drop" aria-pressed="true">Drop late events</button>
+      <button class="btn" data-policy="correct" aria-pressed="false">Publish corrections</button>
+      <label class="btn check"><input type="checkbox" id="wl-outage"> Processor outage at 50 to 72 s</label>
+    </div>
+    <div class="controls">
+      <div class="control"><label for="wl-size"><span>Window size</span> <output></output></label><input id="wl-size" type="range" min="5" max="30" step="1" value="10"></div>
+      <div class="control"><label for="wl-lag">Watermark lag <output></output></label><input id="wl-lag" type="range" min="0" max="40" step="1" value="3"></div>
+      <div class="control"><label for="wl-late">Scans that arrive very late <output></output></label><input id="wl-late" type="range" min="0" max="30" step="1" value="8"></div>
+      <div class="control"><label for="wl-now">Processing clock <output></output></label><input id="wl-now" type="range" min="0" max="170" step="0.5" value="170"></div>
+    </div>
+    <div class="btn-row"><button class="btn primary" data-act="play">Play</button></div>
+    <div class="chart"></div>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>counted on time</span>
+      <span><i style="background:var(--red)"></i>dropped as late</span>
+      <span><i style="background:var(--orange)"></i>counted as a correction</span>
+      <span><i style="background:var(--green)"></i>watermark</span>
+      <span><i class="c11-l-truth"></i>true count</span>
+      <span><i style="background:var(--ink-4)"></i>not yet processed (dashed line: processing clock)</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Scans processed</div><div class="stat-value" data-stat="seen">0</div></div>
+      <div class="stat"><div class="stat-label">Dropped as late</div><div class="stat-value" data-stat="dropped">0</div></div>
+      <div class="stat"><div class="stat-label">Corrections</div><div class="stat-value" data-stat="corr">0</div></div>
+      <div class="stat"><div class="stat-label" data-stat-label="wrong">Windows with a wrong count</div><div class="stat-value sm" data-stat="wrong">0</div></div>
+      <div class="stat"><div class="stat-label">Average wait for a result</div><div class="stat-value sm" data-stat="wait">0</div></div>
+    </div>
+    <div class="verdict"></div>
+    <figcaption>Hopping windows hop by half their size. Sliding windows are drawn as one window ending at every second. A window still open when the input ends is published at the end.</figcaption>
+  </figure>
+
+  <p>Three things are worth trying. With the default settings, raise the watermark lag until nothing is dropped and watch the average wait climb: completeness and latency pull against each other, and the right lag depends on whether a wrong number or a slow number costs you more. Switch to corrections and every window ends correct, at the cost of revised results. Then turn on the outage and window by processing time: the chart now reports a lull and a surge at the gates that did not happen.</p>
+
+  <h2>Whose clock?</h2>
+  <p>Event time has to come from somewhere, usually the device where the event happened, and device clocks cannot be trusted. A phone's clock may be wrong by minutes, or set deliberately to cheat in a game. A common remedy is to log three timestamps: when the event occurred by the device clock, when the device sent it by the device clock, and when the server received it by the server clock. The difference between the last two estimates the device's clock offset, ignoring network delay, which is small next to an offset of minutes. Apply that offset to the first timestamp.</p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 198" role="img" aria-label="A device clock running about three minutes fast. The event happened at 14:02:10 device time, was sent at 14:09:40 device time, and received at 14:06:42 server time. The offset of minus 2 minutes 58 seconds gives a true event time of about 13:59:12.">
+      <defs><marker id="clk-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink-3)"/></marker></defs>
+      <text x="0" y="40" class="diagram-label">Device clock</text>
+      <line x1="110" y1="36" x2="630" y2="36" style="stroke:var(--line-2)"/>
+      <text x="0" y="120" class="diagram-label">Server clock</text>
+      <line x1="110" y1="116" x2="630" y2="116" style="stroke:var(--line-2)"/>
+      <circle cx="170" cy="36" r="5" style="fill:var(--accent)"/>
+      <text x="170" y="22" text-anchor="middle" class="diagram-sub">event happened</text>
+      <text x="170" y="56" text-anchor="middle" style="fill:var(--ink);font:500 12px var(--mono)">14:02:10</text>
+      <circle cx="450" cy="36" r="5" style="fill:var(--ink-3)"/>
+      <text x="450" y="22" text-anchor="middle" class="diagram-sub">sent, after reconnecting</text>
+      <text x="450" y="56" text-anchor="middle" style="fill:var(--ink);font:500 12px var(--mono)">14:09:40</text>
+      <line x1="452" y1="42" x2="478" y2="110" style="stroke:var(--ink-3);stroke-width:1.5" marker-end="url(#clk-arr)"/>
+      <circle cx="480" cy="116" r="5" style="fill:var(--ink-3)"/>
+      <text x="480" y="136" text-anchor="middle" style="fill:var(--ink);font:500 12px var(--mono)">14:06:42</text>
+      <text x="480" y="102" text-anchor="start" dx="10" class="diagram-sub">received</text>
+      <text x="110" y="170" style="fill:var(--ink-2);font:13px var(--sans)">offset = 14:06:42 − 14:09:40 = −2 min 58 s</text>
+      <text x="110" y="188" style="fill:var(--ink-2);font:13px var(--sans)">estimated event time = 14:02:10 − 2 min 58 s ≈ <tspan style="fill:var(--accent);font-weight:500">13:59:12</tspan> server time</text>
+    </svg>
+    </div>
+    <figcaption>A device whose clock runs about three minutes fast. The send and receive timestamps reveal the offset.</figcaption>
+  </figure>
+
+  <p>The practical guidance is short. Carry an event-time timestamp in every event from the moment it is created. Window by event time unless you genuinely want to measure the processor itself. Choose the watermark lag from measured delays rather than guesswork, track how many stragglers you drop, and decide up front whether consumers of your results can handle corrections.</p>
+
+  <p class="book-ref">In the book: Chapter 11, "Processing Streams", in particular "Reasoning About Time" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch11-windows.js"></script>
+</body>
+</html>
