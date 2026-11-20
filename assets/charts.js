@@ -46,6 +46,13 @@ export function logTicks(min, max) {
 /** Compact number: 1.2k, 3.4M, 2B */
 export function fmt(n, digits = 1) {
   const a = Math.abs(n);
+  if (a >= 1e15) {
+    // Beyond trillions, suffixes stop being readable: use powers of ten.
+    const e = Math.floor(Math.log10(a));
+    const sup = String(e).replace(/\d/g, (d) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[d]);
+    return `${trim((n / 10 ** e).toFixed(digits))} × 10${sup}`;
+  }
+  if (a >= 1e12) return trim((n / 1e12).toFixed(digits)) + "T";
   if (a >= 1e9) return trim((n / 1e9).toFixed(digits)) + "B";
   if (a >= 1e6) return trim((n / 1e6).toFixed(digits)) + "M";
   if (a >= 1e3) return trim((n / 1e3).toFixed(digits)) + "k";
