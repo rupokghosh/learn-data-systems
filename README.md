@@ -41,3 +41,7 @@ Found a bug, a typo, or an explanation that is wrong? Issues and pull requests a
 ## Credits
 
 The idea of teaching a technical subject through small interactive lessons comes from [learn-inference.com](https://learn-inference.com).
+
+## License
+
+[MIT](LICENSE). The license covers this project's own code and text. It does not cover *Designing Data-Intensive Applications* itself, which belongs to its author and publisher.
