@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SSTables and LSM-trees · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch3.css">
+</head>
+<body data-lesson="lsm-trees">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>SSTables and LSM-trees</h1>
+  </header>
+
+  <p>The log with a hash index had two weaknesses: every key had to fit in memory, and range queries were impossible. Both come from the same place. The records in each segment sit in the order they were written, so the only way to find anything is to remember exactly where it is.</p>
+  <p>Change one rule and both problems shrink: keep the log-structured design, with its sequential writes and immutable segments, but require every segment to be <strong>sorted by key</strong>. That sounds impossible for a structure that only appends, since writes arrive in any order. The trick is to sort in memory first and write to disk only once the data is in order.</p>
+
+  <h2>Sorted segments</h2>
+  <p>A segment file whose records are sorted by key, with each key appearing at most once per file, is called a <strong>Sorted String Table</strong>, or SSTable<span class="sidenote">The names SSTable and memtable come from Google's Bigtable paper (2006). LevelDB and RocksDB inherited them.</span>. Sorting buys three things.</p>
+  <p>Merging becomes cheap, even for files far larger than memory. Open the input files side by side, repeatedly take the smallest key at the head of any input, and write it to the output. This is the merge step of mergesort. When several inputs hold the same key, keep the version from the newest segment and skip the rest. The output comes out sorted too, written in one sequential pass.</p>
+  <p>The in-memory index can be <strong>sparse</strong>. If you know that <code>hel</code> starts at byte 4096 and <code>nbo</code> starts at byte 8192, then <code>lim</code>, if it exists, is somewhere in between. You read that one block and scan it. One index entry per few kilobytes of data is enough, so billions of keys no longer need billions of index entries.</p>
+  <p>Finally, each block can be compressed before it is written, and the sparse index points at the start of each compressed block. That saves disk space and, just as importantly, I/O bandwidth.</p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 230" role="img" aria-label="A sparse index in memory holds the first key of each block of an SSTable. A lookup for lim falls between hel and nbo, so only block 1 is read.">
+      <text x="0" y="16" class="diagram-label">In memory: sparse index</text>
+      <g class="dg-node"><rect x="0" y="30" width="150" height="28" rx="5"/><text x="12" y="49" style="font-family:var(--mono);font-size:12px">ams → 0</text></g>
+      <g class="dg-node active"><rect x="0" y="62" width="150" height="28" rx="5"/><text x="12" y="81" style="font-family:var(--mono);font-size:12px">hel → 4096</text></g>
+      <g class="dg-node"><rect x="0" y="94" width="150" height="28" rx="5"/><text x="12" y="113" style="font-family:var(--mono);font-size:12px">nbo → 8192</text></g>
+      <g class="dg-node"><rect x="0" y="126" width="150" height="28" rx="5"/><text x="12" y="145" style="font-family:var(--mono);font-size:12px">sfo → 12288</text></g>
+      <text x="0" y="184" class="diagram-sub">get("lim"): hel ≤ lim &lt; nbo,</text>
+      <text x="0" y="200" class="diagram-sub">so read only the block at 4096.</text>
+
+      <text x="220" y="16" class="diagram-label">On disk: one SSTable, four blocks</text>
+      <g class="dg-node"><rect x="220" y="30" width="420" height="28" rx="5"/><text x="232" y="49" class="sub" style="font-family:var(--mono)">ams ath ber bog cai del dub</text><text x="628" y="49" class="sub" text-anchor="end">block 0</text></g>
+      <g class="dg-node active"><rect x="220" y="62" width="420" height="28" rx="5"/><text x="232" y="81" style="font-family:var(--mono);font-size:12px">hel ist jnb <tspan style="font-weight:700">lim</tspan> lis mex</text><text x="628" y="81" class="sub" text-anchor="end">block 1: read</text></g>
+      <g class="dg-node"><rect x="220" y="94" width="420" height="28" rx="5"/><text x="232" y="113" class="sub" style="font-family:var(--mono)">nbo osl rio sel</text><text x="628" y="113" class="sub" text-anchor="end">block 2</text></g>
+      <g class="dg-node"><rect x="220" y="126" width="420" height="28" rx="5"/><text x="232" y="145" class="sub" style="font-family:var(--mono)">sfo syd tok</text><text x="628" y="145" class="sub" text-anchor="end">block 3</text></g>
+      <g style="stroke:var(--line-2);stroke-width:1.2;fill:none">
+        <path d="M150 44 C185 44 185 44 218 44"/><path d="M150 108 C185 108 185 108 218 108"/><path d="M150 140 C185 140 185 140 218 140"/>
+      </g>
+      <path d="M150 76 C185 76 185 76 218 76" style="stroke:var(--accent);stroke-width:2;fill:none"/>
+      <text x="220" y="184" class="diagram-sub">Keys inside a block are sorted, so the block is scanned or binary-searched</text>
+      <text x="220" y="200" class="diagram-sub">after one read. Blocks are often compressed.</text>
+    </svg>
+    </div>
+  </figure>
+
+  <h2>The memtable and the write path</h2>
+  <p>Writes still arrive in random order, so they first go into a sorted structure in memory, the <strong>memtable</strong>. Any balanced search tree works, such as a red-black tree; LevelDB and RocksDB use a skip list. Inserting into it is cheap, and reading it out in key order is trivial. When the memtable grows past a threshold, typically a few megabytes, it is written to disk as a new SSTable. Because the data is already sorted, that flush is one sequential write. A fresh memtable takes new writes while the old one is being flushed.</p>
+  <p>Memory does not survive a crash, so every write is also appended to a <strong>write-ahead log</strong> on disk before it is acknowledged. That log is in arrival order and is never read during normal operation. Its only job is to rebuild the memtable after a restart, and it is deleted as soon as the memtable it protects has been flushed.</p>
+  <p>A read checks the memtable first, then the newest SSTable, then older ones, and stops at the first version of the key it finds. Background compaction keeps the number of SSTables down by merging them and dropping overwritten values and tombstones.</p>
+  <p>Put together, this is a <strong>log-structured merge-tree</strong><span class="sidenote"><em>LSM-tree:</em> Named in a 1996 paper by Patrick O'Neil and colleagues. Today it is the engine inside LevelDB, RocksDB, Cassandra, HBase, ScyllaDB, and many others.</span>. Lucene, the indexing library behind Elasticsearch and Solr, stores its term dictionary in a similar way, with immutable sorted segment files merged in the background.</p>
+
+  <figure class="widget" id="lsm">
+    <p class="widget-title">An LSM-tree you can write to</p>
+    <p class="widget-sub">The memtable flushes at 4 entries. Each SSTable shows its id, key range, and sorted entries; "del" marks a tombstone.</p>
+    <div class="field-row">
+      <input class="field" type="text" id="lsm-key" value="lim" aria-label="Key" maxlength="6" autocomplete="off" spellcheck="false">
+      <input class="field" type="text" id="lsm-val" value="12" aria-label="Value" maxlength="6" autocomplete="off" spellcheck="false">
+      <button class="btn primary" data-act="put">put</button>
+      <button class="btn" data-act="get">get</button>
+      <button class="btn" data-act="del">delete</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn" data-act="random">Write until the next flush</button>
+      <button class="btn" data-act="flush">Flush now</button>
+      <button class="btn" data-act="missing">Look up 20 missing keys</button>
+      <button class="btn" data-act="bloom" aria-pressed="true">Bloom filters</button>
+      <button class="btn" data-act="leveled" aria-pressed="true">Leveled</button>
+      <button class="btn" data-act="tiered" aria-pressed="false">Size-tiered</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <p class="lane-label"><span>Memtable · sorted, in memory</span><span class="count" data-out="memcount"></span></p>
+    <div class="lane" data-out="mem"></div>
+    <p class="lane-label"><span>Write-ahead log · on disk, for crash recovery only</span><span class="count" data-out="walcount"></span></p>
+    <div class="lane" data-out="wal"></div>
+    <div class="levels-wrap" data-out="levels"></div>
+    <div class="merge" hidden></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Lookups</div><div class="stat-value" data-out="gets"></div></div>
+      <div class="stat"><div class="stat-label">Tables in key range</div><div class="stat-value" data-out="consulted"></div></div>
+      <div class="stat"><div class="stat-label" style="color:var(--green)">Ruled out by Bloom</div><div class="stat-value" data-out="bloomno"></div></div>
+      <div class="stat"><div class="stat-label">Tables read</div><div class="stat-value" data-out="tread"></div></div>
+      <div class="stat"><div class="stat-label" style="color:var(--orange)">False positives</div><div class="stat-value" data-out="fp"></div></div>
+    </div>
+    <div class="verdict" aria-live="polite"></div>
+    <figcaption>Write until the next flush a few times and watch a compaction merge sorted runs. Then get a key that lives deep in the tree, and look up keys that do not exist with and without Bloom filters. This toy merges whole levels at once; real engines compact a few files at a time.</figcaption>
+  </figure>
+
+  <h2>Bloom filters: skipping segments</h2>
+  <p>The read path has a weak spot: looking up a key that does not exist. The engine must check the memtable and then every SSTable whose key range might contain it, all the way down to the oldest, before it can say "not found". With dozens of files, that is dozens of disk reads for nothing.</p>
+  <p>So each SSTable carries a <strong>Bloom filter</strong>: a small bit array, kept in memory, that answers "could this file contain this key?" To add a key, hash it with several hash functions and set the bit each one points to. To test a key, check those same bits. If any of them is 0, the key was never added, guaranteed. If all are 1, the key is probably there, but other keys may have set those bits by coincidence. That is a <strong>false positive</strong>, and it costs one wasted read. A filter never produces false negatives.</p>
+
+  <figure class="widget" id="bloom">
+    <p class="widget-title">A Bloom filter, bit by bit</p>
+    <p class="widget-sub">32 bits and 3 hash functions. Adding a key sets the bits its hashes point to. Testing a key checks those same bits.</p>
+    <div class="field-row">
+      <input class="field wide" type="text" id="bf-key" value="cedar" aria-label="Key" maxlength="12" autocomplete="off" spellcheck="false">
+      <button class="btn primary" data-act="add">Add</button>
+      <button class="btn" data-act="test">Test</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn" data-act="random">Add 4 random keys</button>
+      <button class="btn" data-act="many">Test 100 keys never added</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="bits" role="img" aria-label="The filter's 32 bits"></div>
+    <div class="legend">
+      <span><i style="background:var(--ink-3)"></i>bit is 1</span>
+      <span><i style="box-shadow:0 0 0 2px var(--orange) inset"></i>set by this add</span>
+      <span><i style="box-shadow:0 0 0 2px var(--accent) inset"></i>checked, is 1</span>
+      <span><i style="box-shadow:0 0 0 2px var(--green) inset"></i>checked, is 0</span>
+    </div>
+    <p class="lane-label"><span>Keys added</span></p>
+    <div class="chips" data-out="added"></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Keys added</div><div class="stat-value" data-out="n"></div></div>
+      <div class="stat"><div class="stat-label">Bits set</div><div class="stat-value" data-out="set"></div></div>
+      <div class="stat"><div class="stat-label">Expected false positives</div><div class="stat-value" data-out="exp"></div></div>
+      <div class="stat"><div class="stat-label">Measured</div><div class="stat-value sm" data-out="meas"></div></div>
+    </div>
+    <div class="verdict" aria-live="polite"></div>
+  </figure>
+
+  <p>The false-positive rate depends on how many bits you spend per key. A common setting in LevelDB and RocksDB is 10 bits per key, about a byte and a quarter, which gives roughly a 1% false-positive rate with the best number of hash functions. Because the filters sit in memory, ruling a file out costs no I/O at all. Filters do nothing for range queries, though: a scan has to visit every file whose key range overlaps the range you asked for.</p>
+
+  <h2>Compaction strategies</h2>
+  <p>When and what to merge is the main tuning knob of an LSM-tree, and two families dominate. <strong>Size-tiered</strong> compaction waits until there are several SSTables of similar size and merges them into one bigger table. Files grow in tiers, each write is rewritten relatively few times, and writes are cheap. The price is that the same key can sit in many tables at once, so reads may check more files, and a big merge temporarily needs room for both its inputs and its output. Cassandra's long-standing default strategy works this way, and HBase uses a variant of it.</p>
+  <p><strong>Leveled</strong> compaction splits the key range into many small, non-overlapping SSTables per level, with each level about ten times larger than the one above. Compaction moves a few files at a time into the next level, so the work is incremental and disk usage stays close to the live data size. A point read checks at most one table per level below L0. The price is that data is rewritten more often as it sinks through the levels. LevelDB and RocksDB use leveled compaction by default, and Cassandra offers it as an option.</p>
+  <p>Switch the simulator between the two and write until a few flushes have happened. Size-tiered piles up overlapping tables; leveled keeps lower levels tidy but compacts more often. Either way, writes stay sequential, the data stays sorted for range scans, and the engine can absorb write rates far above what an update-in-place design could handle. The next lesson looks at that update-in-place design: the B-tree.</p>
+
+  <p class="book-ref">In the book: Chapter 3, "SSTables and LSM-Trees" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch3-lsm.js"></script>
+</body>
+</html>

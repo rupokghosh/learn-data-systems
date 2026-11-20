@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B-trees · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch3.css">
+</head>
+<body data-lesson="b-trees">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>B-trees</h1>
+  </header>
+
+  <p>Log-structured engines became popular relatively recently. The B-tree is far older: it was published by Rudolf Bayer and Edward McCreight in 1970, and within a decade it was the standard index structure in databases. It still is. Almost every relational database, including PostgreSQL, MySQL's InnoDB, SQL Server, Oracle, and SQLite, stores its indexes (and often the tables themselves) in B-trees, and so do many non-relational stores.</p>
+  <p>Like an SSTable, a B-tree keeps keys in sorted order, so point lookups and range scans are both efficient. Beyond that, the two designs pull in opposite directions. An LSM-tree never modifies a file once it is written. A B-tree modifies data in place, on a fixed grid of pages.</p>
+
+  <h2>Pages and references</h2>
+  <p>A B-tree divides the database file into fixed-size <strong>pages</strong><span class="sidenote"><em>page:</em> The unit a B-tree reads and writes. PostgreSQL uses 8 KB pages and InnoDB 16 KB by default. Disks also work in fixed-size blocks, so a page maps neatly onto them.</span>, and always reads or writes a whole page at a time. Each page has an address, and a page can refer to another page by that address, much like a pointer, except that it points into a file on disk instead of into memory.</p>
+  <p>One page is the <strong>root</strong>. It holds a handful of keys that act as boundaries, with a page reference between each pair. The reference between keys 35 and 65, say, leads to a page responsible for every key from 35 up to (but not including) 65. That child splits its range further, and so on down to the <strong>leaf pages</strong>, which hold the keys themselves together with their values, or with a reference to where the full row lives.</p>
+  <p>The number of references in one page is the <strong>branching factor</strong>. Real pages hold hundreds of keys, so the branching factor is in the hundreds too. The tree below uses tiny pages of at most three keys, so you can watch the structure change.</p>
+
+  <figure class="widget" id="btree">
+    <p class="widget-title">A B-tree with three keys per page</p>
+    <p class="widget-sub">Interior pages hold separator keys; leaf pages hold the data. Insert a key to watch the descent and any splits; look one up to count pages read.</p>
+    <div class="field-row">
+      <input class="field" type="text" inputmode="numeric" id="bt-key" value="47" aria-label="Key, a number from 0 to 999" maxlength="3" autocomplete="off">
+      <button class="btn primary" data-act="insert">Insert</button>
+      <button class="btn" data-act="lookup">Look up</button>
+      <button class="btn" data-act="random">Insert 5 random</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="scroll-x bt"></div>
+    <div class="legend">
+      <span><i style="background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent) inset"></i>page on the lookup path</span>
+      <span><i style="background:var(--orange-soft);box-shadow:0 0 0 1px var(--orange) inset"></i>page that split</span>
+      <span><i style="background:var(--accent)"></i>separator pushed up, or key found</span>
+      <span><i style="background:var(--green-soft)"></i>key just inserted</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Keys</div><div class="stat-value" data-out="keys"></div></div>
+      <div class="stat"><div class="stat-label">Pages</div><div class="stat-value" data-out="pages"></div></div>
+      <div class="stat"><div class="stat-label">Depth</div><div class="stat-value" data-out="depth"></div></div>
+      <div class="stat"><div class="stat-label">Pages read, last operation</div><div class="stat-value" data-out="read"></div></div>
+    </div>
+    <div class="verdict" aria-live="polite"></div>
+    <figcaption>Insert 47, which fills the second leaf. Then insert 44: the leaf splits, the full root has to take a new separator and splits too, and the tree gains a level at the top.</figcaption>
+  </figure>
+
+  <h2>Inserts and page splits</h2>
+  <p>To <strong>look up</strong> a key, start at the root, pick the reference whose range covers the key, read that page, and repeat until you reach a leaf. The number of pages you read equals the depth of the tree. To <strong>update</strong> a value, do the same lookup and overwrite the value inside its leaf page, then write that page back to the same place on disk. No other page changes.</p>
+  <p>To <strong>insert</strong> a new key, find the leaf whose range covers it. If the leaf has room, add the key and write the page back. If it is full, <strong>split</strong> it: move the upper half of its keys into a brand new page, and add a new separator key to the parent so that lookups know which half to visit. If the parent overflows as a result, it splits too, and the separator moves up another level.</p>
+  <p>The only way the tree gets deeper is when the root itself splits. Then a new root is created above it, with one separator and two children. Growth happens at the top, never at the bottom, so every leaf is always the same distance from the root. That property, being <strong>balanced</strong>, is what guarantees that a tree of <em>n</em> keys is only about log<sub><em>b</em></sub>&nbsp;<em>n</em> pages deep, where <em>b</em> is the branching factor.</p>
+  <p>Notice what the toy above makes visible. Splits leave pages half empty, so a B-tree built from random inserts typically has pages around two-thirds full. That unused space is one of the costs the next lesson measures.</p>
+
+  <h2>How deep is deep?</h2>
+  <p>Logarithms with a base in the hundreds grow astonishingly slowly. Choose a page size and a key size below, and see how much data a tree of a given depth can reach.</p>
+
+  <figure class="widget" id="capacity">
+    <p class="widget-title">B-tree capacity calculator</p>
+    <p class="widget-sub">Depth counts every page a lookup reads, root and leaf included. Each separator key is paired with an 8-byte page reference.</p>
+    <div class="controls">
+      <div class="control"><label for="cap-page">Page size <output></output></label><input id="cap-page" type="range" min="0" max="6" step="1" value="3"></div>
+      <div class="control"><label for="cap-key">Key size <output></output></label><input id="cap-key" type="range" min="0" max="11" step="1" value="3"></div>
+      <div class="control"><label for="cap-depth">Depth <output></output></label><input id="cap-depth" type="range" min="1" max="6" step="1" value="4"></div>
+      <div class="control"><label for="cap-fill">Pages full, on average <output></output></label><input id="cap-fill" type="range" min="50" max="100" step="5" value="70"></div>
+    </div>
+    <div class="stats" style="margin-top:4px">
+      <div class="stat"><div class="stat-label">Branching factor</div><div class="stat-value" data-out="b"></div></div>
+      <div class="stat"><div class="stat-label">Leaf pages</div><div class="stat-value" data-out="leaves"></div></div>
+      <div class="stat"><div class="stat-label">Data in the leaves</div><div class="stat-value" data-out="data"></div></div>
+      <div class="stat"><div class="stat-label">Page reads per lookup</div><div class="stat-value" data-out="reads"></div></div>
+    </div>
+    <div class="table-wrap"><table class="tradeoffs">
+      <thead><tr><th>Level</th><th>Pages</th><th>Size of the level</th><th>Contents</th></tr></thead>
+      <tbody data-out="rows"></tbody>
+    </table></div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>With 8 KB pages and small keys, four levels already reach tens of gigabytes and five levels reach terabytes. Just as important, almost all of the tree's pages are leaves. The interior levels are a small fraction of the total, so the database keeps them in its buffer cache, and a lookup usually costs a single real disk read.</p>
+
+  <h2>Crash safety and concurrency</h2>
+  <p>Overwriting pages in place is the B-tree's defining move, and its main hazard. A split writes at least three pages: the old page, the new page, and the parent. If the machine dies after writing some of them, the tree can be left with a page that nothing points to, or a reference to a page that was never written.</p>
+  <p>The standard defense is a <strong>write-ahead log</strong> (WAL)<span class="sidenote">InnoDB calls it the redo log. PostgreSQL calls it the WAL, and also ships it to replicas.</span>: an append-only file that records every change before it is applied to the pages. After a crash, the database replays the log to bring every page to a consistent state. The cost is that every change is written at least twice, once to the log and once to the page.</p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 200" role="img" aria-label="An insert first appends its changes to the write-ahead log, then overwrites the affected pages in place. After a crash, replaying the log repairs pages that were only partly written.">
+      <defs><marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink-3)"/></marker></defs>
+      <g class="dg-node active"><rect x="0" y="70" width="110" height="46" rx="8"/><text x="14" y="91">insert 47</text><text x="14" y="107" class="sub">one logical write</text></g>
+      <text x="200" y="20" class="diagram-label">1. Append to the WAL</text>
+      <g class="dg-node"><rect x="170" y="32" width="230" height="30" rx="5"/><text x="182" y="52" class="sub" style="font-family:var(--mono)">… · leaf 7: add 47 · split 7 → 7, 12 · page 3: add 47</text></g>
+      <text x="200" y="102" class="diagram-sub">sequential, small, flushed before</text>
+      <text x="200" y="117" class="diagram-sub">the write is acknowledged</text>
+      <text x="450" y="20" class="diagram-label">2. Overwrite pages in place</text>
+      <g class="dg-node miss"><rect x="440" y="32" width="60" height="30" rx="5"/><text x="452" y="52" class="sub">page 3</text></g>
+      <g class="dg-node miss"><rect x="510" y="32" width="60" height="30" rx="5"/><text x="522" y="52" class="sub">page 7</text></g>
+      <g class="dg-node miss"><rect x="580" y="32" width="60" height="30" rx="5"/><text x="588" y="52" class="sub">page 12</text></g>
+      <text x="450" y="102" class="diagram-sub">random locations, whole pages,</text>
+      <text x="450" y="117" class="diagram-sub">possibly much later</text>
+      <g style="stroke:var(--ink-3);stroke-width:1.5;fill:none">
+        <path d="M112 86 C140 86 140 47 166 47" marker-end="url(#arr3)"/>
+        <path d="M402 47 L436 47" marker-end="url(#arr3)"/>
+      </g>
+      <line x1="0" y1="146" x2="640" y2="146" style="stroke:var(--line)"/>
+      <text x="0" y="172" class="diagram-sub">Crash after step 1 but before every page in step 2 is written? On restart, replay the WAL from the last checkpoint</text>
+      <text x="0" y="190" class="diagram-sub">and redo the changes. Once all pages are safely on disk, the log up to that point can be recycled.</text>
+    </svg>
+    </div>
+  </figure>
+
+  <p>Concurrency needs care for the same reason. If one thread is halfway through a split, another thread descending the tree must not follow a reference into a page that is not ready. B-tree implementations protect pages with <strong>latches</strong>: short-lived, lightweight locks held only while a page is being read or changed, as opposed to the transaction-level locks that protect your rows. Log-structured engines have it easier here, because they build new files in the background and swap them in atomically.</p>
+  <p>Decades of use have produced many refinements. Some engines, such as LMDB, never overwrite a page: they write the modified copy elsewhere along with new copies of its parents up to the root, which doubles as crash protection and gives readers consistent snapshots for free. Interior pages can store shortened keys, since a separator only needs enough bytes to tell two ranges apart, which raises the branching factor. And leaf pages often carry references to their left and right siblings, so a range scan can walk across the leaves without climbing back up the tree.</p>
+
+  <p class="book-ref">In the book: Chapter 3, "B-Trees" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch3-btree.js"></script>
+</body>
+</html>

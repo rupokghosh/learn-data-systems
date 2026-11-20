@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comparing B-trees and LSM-trees · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch3.css">
+</head>
+<body data-lesson="lsm-vs-btree">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Comparing B-trees and LSM-trees</h1>
+  </header>
+
+  <p>The usual rule of thumb says LSM-trees are faster for writes and B-trees are faster for reads. Like most rules of thumb in storage, it is a decent first guess and a poor final answer. Which engine wins depends on the size of your records, how often you overwrite them, how much memory you have, and what your disks are good at. Benchmarks that ignore those details tend to prove whatever their authors expected.</p>
+  <p>This lesson takes the two toy engines from the previous lessons, feeds them the same stream of writes, and counts what each one actually did to the disk.</p>
+
+  <h2>Three kinds of amplification</h2>
+  <p>Storage engines are easiest to compare through three ratios. <strong>Write amplification</strong> is the bytes written to disk divided by the bytes the application asked to write. <strong>Read amplification</strong> is how many disk reads one query needs. <strong>Space amplification</strong> is the disk space used divided by the size of the live data. No design minimizes all three at once<span class="sidenote">Researchers have argued this formally as the RUM conjecture: an access method that optimizes two of read, update, and memory (space) overhead must pay in the third.</span>; each engine picks which one to spend.</p>
+  <p>Move the sliders and the workload reruns in both engines. Every number below comes from that run, including the curves, which show cumulative bytes written to disk as the writes arrive.</p>
+
+  <figure class="widget" id="arena">
+    <p class="widget-title">One workload, two engines</p>
+    <p class="widget-sub">Random keys, a mix of new keys and overwrites of existing ones. After the writes, 400 point reads (half for keys that exist, half for keys that do not) and 40 range scans.</p>
+    <div class="controls">
+      <div class="control"><label for="cmp-writes">Writes <output></output></label><input id="cmp-writes" type="range" min="0" max="5" step="1" value="4"></div>
+      <div class="control"><label for="cmp-over">Writes that overwrite an existing key <output></output></label><input id="cmp-over" type="range" min="0" max="90" step="10" value="50"></div>
+      <div class="control"><label for="cmp-rec">Record size <output></output></label><input id="cmp-rec" type="range" min="0" max="5" step="1" value="2"></div>
+      <div class="control"><label for="cmp-page">Page and block size <output></output></label><input id="cmp-page" type="range" min="0" max="4" step="1" value="2"></div>
+      <div class="control"><label for="cmp-mem">LSM memtable size <output></output></label><input id="cmp-mem" type="range" min="0" max="5" step="1" value="2"></div>
+      <div class="control"><label for="cmp-flush">B-tree writes dirty pages back after <output></output></label><input id="cmp-flush" type="range" min="0" max="4" step="1" value="2"></div>
+    </div>
+    <div class="chart"></div>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>LSM-tree, bytes written to disk</span>
+      <span><i style="background:var(--orange)"></i>B-tree, bytes written to disk</span>
+      <span><i style="background:var(--ink-3)"></i>bytes the application wrote</span>
+    </div>
+    <div class="table-wrap"><table class="tradeoffs arena">
+      <thead><tr><th>Measured</th><th>LSM-tree</th><th>B-tree</th></tr></thead>
+      <tbody data-out="table"></tbody>
+    </table></div>
+    <div class="verdict" aria-live="polite"></div>
+    <figcaption>Bold values are the better of the two where the difference is more than 5%.</figcaption>
+  </figure>
+
+  <p>These are toy models, and real engines differ in many ways. The LSM-tree here logs every write, flushes the memtable to an SSTable, and uses leveled compaction with four L0 tables and levels ten times apart. It merges whole levels at once, keeps a Bloom filter of 10 bits per key and a sparse index in memory, and costs one block read per table it opens. The B-tree logs every write, writes whole pages, and writes dirty pages back after a set number of writes. It counts every page on the path as a read, although real databases cache the upper levels. Neither model includes compression, caching of data blocks, SSD internals, concurrency, or time. The shapes are trustworthy; the exact ratios are not.</p>
+
+  <h2>Writes: sequential versus random</h2>
+  <p>A B-tree writes every change at least twice: once to the write-ahead log and once to the page. And it writes the whole page even if one small record changed, so small records in big pages are expensive. Some engines write pages more than once to protect against a page being torn in half by a crash; InnoDB's doublewrite buffer does exactly that. Set the record size to 32 bytes and the page size to 16 KB to see the B-tree's write amplification climb. Then let it write dirty pages back less often and watch how much batching helps, which is what a real buffer pool does.</p>
+  <p>An LSM-tree also writes data several times: once to its log, once in the flush, and again every time compaction moves it to a lower level. But it writes in large sequential chunks and never rewrites a page to change a few bytes, so its write amplification is often lower. Its cost does grow with the data, though: add more writes and watch the LSM figure rise as a new level appears, since each level is one more rewrite. Production LSM databases with many levels commonly see write amplification of 10 or more. On a write-heavy system that matters directly, because every extra byte written spends disk bandwidth the application could have used. Sequential writes are far faster than random ones on spinning disks, and they are kinder to SSDs too, whose firmware has to garbage-collect around scattered small writes. SSTables also compress well and have no half-empty pages, so the files tend to be smaller.</p>
+
+  <h2>Reads and space</h2>
+  <p>For point reads, the B-tree pays one page per level, and the top levels are almost always in memory. The LSM-tree checks the memtable and then every table that might hold the key. With Bloom filters, most of those checks cost nothing, so a point read often needs about one block read either way. Range scans are where the LSM-tree's read amplification shows. A filter cannot rule out a range, so the scan has to read from every table that overlaps it and merge the results. More levels or more L0 tables means more blocks per scan.</p>
+  <p>For space, the costs come from different places. A B-tree leaves free space in pages after splits, so it typically sits around two-thirds full. An LSM-tree holds obsolete versions and tombstones until compaction catches up with them. Push the overwrite slider to 90% and the LSM-tree's space amplification rises, because many old versions are still waiting in the upper levels.</p>
+
+  <h2>Costs that averages hide</h2>
+  <p>Compaction runs in the background, but it shares the disk with your queries. Most of the time nobody notices. Occasionally a read or write has to wait for a large compaction to free up disk bandwidth, and that shows up in the high percentiles of response time. B-trees tend to have more predictable latency. Look at the "largest single burst" row: one compaction can be a large share of everything the LSM-tree writes.</p>
+  <p>Worse, at a high enough write rate compaction can fall behind. Unmerged files pile up, reads slow down because there are more of them to check, and the disk fills. RocksDB responds with write stalls, deliberately slowing incoming writes until compaction catches up. An LSM-based system needs monitoring for exactly this, because nothing fails loudly until it is too late.</p>
+  <p>Finally, in a B-tree every key lives in exactly one place. That makes it natural to put locks on ranges of keys directly in the tree, which is how many relational databases implement transaction isolation. In an LSM-tree, versions of the same key may be scattered across several files, and the engine has to reconcile them.</p>
+  <p>There is no universal winner. B-trees are deeply entrenched and serve most workloads well. LSM-trees keep gaining ground where writes dominate: RocksDB runs under MySQL as MyRocks, and CockroachDB, TiKV, and Cassandra are built on LSM engines. Test both with your own workload before you believe either rule of thumb.</p>
+
+  <p class="book-ref">In the book: Chapter 3, "Comparing B-Trees and LSM-Trees" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch3-compare.js"></script>
+</body>
+</html>

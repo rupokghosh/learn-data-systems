@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analytics and column storage · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch3.css">
+</head>
+<body data-lesson="column-storage">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Analytics and column storage</h1>
+  </header>
+
+  <p>Every engine so far was built for the same kind of request: find a few records by key, then insert or update a few more. A user opens their playlist, a checkout reserves an item, a sensor reports a reading. That pattern is called <strong>online transaction processing</strong>, or OLTP, and it is what most application databases spend their lives doing.</p>
+  <p>Businesses also ask a second kind of question. How many minutes of jazz were streamed in Brazil last week? Which tracks lose listeners in the first thirty seconds? Answering means scanning millions of records, touching only a few columns of each, and boiling them down to a handful of numbers. That pattern is <strong>online analytic processing</strong>, OLAP, and it wants a very different storage layout.</p>
+
+  <h2>Two kinds of workload</h2>
+  <div class="table-wrap"><table class="tradeoffs">
+    <thead><tr><th></th><th>Transaction processing (OLTP)</th><th>Analytics (OLAP)</th></tr></thead>
+    <tbody>
+      <tr><td>Typical read</td><td>A few records, found by key</td><td>Aggregate over millions of records</td></tr>
+      <tr><td>Typical write</td><td>Small, random, from user actions</td><td>Large batches or a steady stream of appends</td></tr>
+      <tr><td>Who asks</td><td>End users, through the application</td><td>Analysts, dashboards, data scientists</td></tr>
+      <tr><td>Data it sees</td><td>The current state</td><td>The history of events over time</td></tr>
+      <tr><td>Bottleneck</td><td>Seek time per request</td><td>Bytes scanned per query</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>Running heavy analytic queries on the production database is risky: one big scan can starve the requests your users are waiting on. So most companies copy their data into a separate <strong>data warehouse</strong>. Data is extracted from the operational systems, transformed into an analysis-friendly shape, and loaded into the warehouse, a process called ETL<span class="sidenote"><em>ETL:</em> Extract, transform, load. It may run as a nightly batch or as a continuous stream of changes from each source database.</span>. The warehouse can then use storage built purely for reading: Vertica, Amazon Redshift, Snowflake, BigQuery, and ClickHouse are examples, as are open-source query engines such as Trino and Spark SQL that read files directly.</p>
+  <p>Warehouse tables are usually arranged as a <strong>star schema</strong>. At the center sits a <strong>fact table</strong> where each row is one event: here, one play of one track. Its columns are either measurements, such as seconds played, or references to <strong>dimension tables</strong> that describe the who, what, where, and when of the event.</p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 300" role="img" aria-label="Star schema: a fact_plays table in the center references dim_date, dim_track, dim_listener, and dim_device.">
+      <g style="stroke:var(--line-2);stroke-width:1.5;fill:none">
+        <path d="M232 104 L180 72"/><path d="M408 120 L460 72"/><path d="M232 138 L180 228"/><path d="M408 156 L460 228"/>
+      </g>
+      <g class="dg-node active"><rect x="232" y="64" width="176" height="172" rx="8"/>
+        <text x="246" y="88">fact_plays</text>
+        <text x="246" y="108" class="sub" style="font-family:var(--mono)">date_key → dim_date</text>
+        <text x="246" y="124" class="sub" style="font-family:var(--mono)">track_id → dim_track</text>
+        <text x="246" y="140" class="sub" style="font-family:var(--mono)">listener_id → dim_listener</text>
+        <text x="246" y="156" class="sub" style="font-family:var(--mono)">device_id → dim_device</text>
+        <text x="246" y="172" class="sub" style="font-family:var(--mono)">country</text>
+        <text x="246" y="188" class="sub" style="font-family:var(--mono)">seconds_played</text>
+        <text x="246" y="204" class="sub" style="font-family:var(--mono)">skipped</text>
+        <text x="246" y="222" class="sub">one row per play: billions</text>
+      </g>
+      <g class="dg-node"><rect x="0" y="10" width="180" height="106" rx="8"/>
+        <text x="14" y="32">dim_date</text>
+        <text x="14" y="52" class="sub" style="font-family:var(--mono)">date_key</text>
+        <text x="14" y="68" class="sub" style="font-family:var(--mono)">day_of_week, month</text>
+        <text x="14" y="84" class="sub" style="font-family:var(--mono)">is_holiday</text>
+        <text x="14" y="104" class="sub">one row per day</text>
+      </g>
+      <g class="dg-node"><rect x="460" y="10" width="180" height="106" rx="8"/>
+        <text x="474" y="32">dim_track</text>
+        <text x="474" y="52" class="sub" style="font-family:var(--mono)">track_id</text>
+        <text x="474" y="68" class="sub" style="font-family:var(--mono)">title, artist, genre</text>
+        <text x="474" y="84" class="sub" style="font-family:var(--mono)">length_seconds</text>
+        <text x="474" y="104" class="sub">one row per track</text>
+      </g>
+      <g class="dg-node"><rect x="0" y="184" width="180" height="106" rx="8"/>
+        <text x="14" y="206">dim_listener</text>
+        <text x="14" y="226" class="sub" style="font-family:var(--mono)">listener_id</text>
+        <text x="14" y="242" class="sub" style="font-family:var(--mono)">plan, signup_date</text>
+        <text x="14" y="258" class="sub" style="font-family:var(--mono)">birth_year</text>
+        <text x="14" y="278" class="sub">one row per account</text>
+      </g>
+      <g class="dg-node"><rect x="460" y="184" width="180" height="106" rx="8"/>
+        <text x="474" y="206">dim_device</text>
+        <text x="474" y="226" class="sub" style="font-family:var(--mono)">device_id</text>
+        <text x="474" y="242" class="sub" style="font-family:var(--mono)">kind, os, app_version</text>
+        <text x="474" y="278" class="sub">one row per device type</text>
+      </g>
+    </svg>
+    </div>
+    <figcaption>A star schema for a music streaming service. The fact table is narrow here; real ones often have a hundred or more columns. Splitting dimensions further (genre into its own table, say) gives a "snowflake" schema.</figcaption>
+  </figure>
+
+  <h2>Storing columns instead of rows</h2>
+  <p>Fact tables are where the size is: billions of rows, often a hundred or more columns wide. Yet a typical analytic query reads only three or four of those columns. A conventional row-oriented engine, whether B-tree or LSM, stores all of a row's values next to each other. To sum one column it must pull every row off the disk, all hundred columns of it, and throw most of the bytes away.</p>
+  <p><strong>Column-oriented storage</strong> flips the layout. All the values of one column are stored together, typically in a file of their own, and a query reads only the files for the columns it names. The one rule is that every column file keeps rows in the same order, so the 9th value of <code>track_id</code> and the 9th value of <code>seconds</code> belong to the same play. Parquet, the most widely used columnar file format, follows the same idea inside each file.</p>
+
+  <figure class="widget" id="layout">
+    <p class="widget-title">Which bytes does a query read?</p>
+    <p class="widget-sub">Sixteen rows of 20 bytes on toy 32-byte pages. Each square is one byte, colored by its column. Text columns such as device are stored as 2-byte codes.</p>
+    <div class="btn-row">
+      <button class="btn" data-q="sum" aria-pressed="true">SUM for one track</button>
+      <button class="btn" data-q="count" aria-pressed="false">COUNT for one country</button>
+      <button class="btn" data-q="group" aria-pressed="false">AVG per device</button>
+      <button class="btn" data-q="point" aria-pressed="false">One whole row</button>
+    </div>
+    <pre class="code"><code data-out="sql"></code></pre>
+    <div class="ch3-pair">
+      <div><p class="disk-title"><span>Row-oriented: one file</span><span class="count" data-out="rowcount"></span></p><div class="diskmap" data-out="rowdisk"></div></div>
+      <div><p class="disk-title"><span>Column-oriented: a file per column</span><span class="count" data-out="colcount"></span></p><div class="diskmap" data-out="coldisk"></div></div>
+    </div>
+    <div class="legend">
+      <span><i class="c0"></i>date_key</span><span><i class="c1"></i>track_id</span><span><i class="c2"></i>listener_id</span>
+      <span><i class="c3"></i>device</span><span><i class="c4"></i>country</span><span><i class="c5"></i>seconds</span>
+    </div>
+    <p class="note">Faint pages are not read. Outlined pages are read: pale bytes in them are wasted, solid bytes are ones the query needs.</p>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Row layout reads</div><div class="stat-value" data-out="rowbytes"></div></div>
+      <div class="stat"><div class="stat-label">Column layout reads</div><div class="stat-value" data-out="colbytes"></div></div>
+      <div class="stat"><div class="stat-label">Bytes the query needs</div><div class="stat-value" data-out="need"></div></div>
+      <div class="stat"><div class="stat-label">Result</div><div class="stat-value sm" data-out="result"></div></div>
+    </div>
+    <div class="verdict"></div>
+    <div class="table-wrap"><table class="mini" data-out="table"></table></div>
+  </figure>
+
+  <p>The last query is the exception that explains why OLTP databases stay row-oriented. Reading one complete record from a column store means visiting every column file and reassembling the row. Columnar layouts trade fast single-record access for fast scans, and analytics is almost all scans.</p>
+
+  <h2>Compression: bitmaps and runs</h2>
+  <p>Storing a column on its own has a second payoff: the values in a column look alike. A fact table may have billions of rows but only a few thousand distinct tracks, a few dozen countries, a handful of device types. Repetitive data compresses well, and one technique fits columns especially well: <strong>bitmap encoding</strong>. For each distinct value, keep a bitmap with one bit per row, set to 1 where the row has that value.</p>
+  <p>When there are few distinct values, the bitmaps are small enough to store as they are. When there are many, each bitmap is mostly zeros, and <strong>run-length encoding</strong> squeezes it further by storing the lengths of alternating runs of 0s and 1s instead of the bits.</p>
+
+  <figure class="widget" id="rle">
+    <p class="widget-title">Bitmaps and run-length encoding</p>
+    <p class="widget-sub">The track_id column of 40 plays. Five distinct tracks, so five bitmaps of 40 bits each.</p>
+    <div class="btn-row"><button class="btn" data-act="sort" aria-pressed="false">Sort rows by track_id</button></div>
+    <p class="lane-label"><span>Column values, in stored row order</span></p>
+    <div class="vstrip"></div>
+    <div data-out="maps"></div>
+    <p class="note">Runs alternate between 0s and 1s, starting with 0s; darker numbers count 1s. Trailing 0s are not stored.</p>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Raw column, 4 B per value</div><div class="stat-value" data-out="raw"></div></div>
+      <div class="stat"><div class="stat-label">Plain bitmaps</div><div class="stat-value" data-out="bitmap"></div></div>
+      <div class="stat"><div class="stat-label">Run-length encoded, 1 B per run</div><div class="stat-value" data-out="rlesize"></div></div>
+      <div class="stat"><div class="stat-label">Smaller than raw by</div><div class="stat-value" data-out="ratio"></div></div>
+    </div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>Bitmaps also make filtering fast. <code>WHERE track_id IN (31, 47)</code> becomes a bitwise OR of two bitmaps, and a condition on a second column becomes a bitwise AND with that column's bitmap. Because the k-th bit of every bitmap refers to the same row, the CPU can combine them a whole machine word at a time. Analytic engines go further and process compressed column chunks in tight loops that fit in the CPU cache and use SIMD instructions, an approach usually called <strong>vectorized execution</strong>.</p>
+
+  <h2>Sort order, writes, and precomputed answers</h2>
+  <p>Column files have to share a row order, but that order does not have to be arrival order. A column store can sort its rows by a key the administrator picks, for example by date and then by track. Queries that filter on date can then skip whole ranges, and as the toggle above shows, the first sort column compresses dramatically, because equal values sit in long runs. The second sort column compresses well within each run of the first, and later columns look close to random. Vertica, which grew out of the C-Store research project, can keep several copies of the same data sorted different ways, so each query can use the copy whose order suits it best.</p>
+  <p>Sorted, compressed columns are terrible at in-place updates: inserting one row in the middle would mean rewriting every column file. The answer is one you have already met. Writes go first to an in-memory store, and are merged into the column files on disk in large batches, much like an LSM-tree's memtable and compaction. Queries read both and combine the results. ClickHouse's MergeTree engine, for instance, writes each batch as an immutable sorted part and merges parts in the background.</p>
+  <p>Finally, if the same aggregates are asked for again and again, why recompute them? A <strong>materialized view</strong> stores a query's results on disk and updates them when the underlying data changes. A <strong>data cube</strong> is a special case: a grid of totals along several dimensions at once, such as seconds played per track per day. Summing one row of the grid answers "per track", summing a column answers "per day", with no scan at all. The cost is flexibility: a question about any attribute that is not a dimension of the cube, such as listeners on the family plan, needs the raw data again. That is why warehouses keep the raw facts and treat cubes as an accelerator, not a replacement.</p>
+
+  <p class="book-ref">In the book: Chapter 3, "Transaction Processing or Analytics?" and "Column-Oriented Storage" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch3-columns.js"></script>
+</body>
+</html>
