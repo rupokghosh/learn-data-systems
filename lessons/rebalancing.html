@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rebalancing partitions · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch6.css">
+</head>
+<body data-lesson="rebalancing">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Rebalancing partitions</h1>
+  </header>
+
+  <p>A cluster does not stand still. Data grows, so you add disks and machines. Traffic grows, so you add CPUs. A machine dies, and its share of the work has to go somewhere. Each of these changes means moving data and requests from some nodes to others, a process called <strong>rebalancing</strong>.</p>
+  <p>Whatever the strategy, three things should hold. Afterwards, load should again be spread fairly. While it runs, the database should keep serving reads and writes. And it should move no more data than necessary, because every byte copied competes with real traffic for network and disk.</p>
+
+  <h2>Why not hash mod N</h2>
+  <p>With hash partitioning, the obvious rule is to send a key to node <code>hash(key) mod N</code>, where N is the number of nodes. It spreads keys evenly and needs no lookup table. The trouble starts when N changes. A key whose hash is 1,000,003 lives on node 3 of a ten-node cluster. Add an eleventh node and it belongs on node 4; with twelve nodes, on node 7. Almost every key changes node every time the cluster changes size, so adding one machine to relieve pressure sets off a near-total reshuffle of the data, at exactly the moment the cluster is short of capacity.</p>
+
+  <h2>A fixed number of partitions</h2>
+  <p>The fix is to stop tying partitions to nodes. Create many more partitions than there are nodes, for example 1,000 partitions on a ten-node cluster, about a hundred each. A key's partition never changes, because the number of partitions never changes. When a node joins, it takes a few whole partitions from each existing node until the shares even out. When a node leaves, its partitions are dealt out to the others. Only the mapping from partitions to nodes changes, and only the partitions that move are copied. The old owner keeps serving a partition while the copy is in transit and hands it over once the new node has caught up.</p>
+  <p>Riak, Couchbase, and Elasticsearch all rebalance this way. Elasticsearch fixes the number of primary shards when an index is created; changing it later means splitting or shrinking the index, or reindexing it. The partition count therefore has to be chosen up front with room for growth. Too few, and each partition becomes so large that moving or recovering it takes hours. Too many, and the fixed overhead of each one, its files, memory, and bookkeeping, adds up. Machines of different sizes are easy to accommodate: a bigger node simply gets more partitions.<span class="sidenote">A common rule of thumb for Elasticsearch is to keep shards in the tens of gigabytes; Kafka users choose partition counts with the largest consumer group they expect in mind.</span></p>
+
+  <h2>Dynamic partitions and the hash ring</h2>
+  <p>Fixed partitions fit hash partitioning well and key ranges badly. If range boundaries are chosen poorly, some partitions sit nearly empty while others overflow. Databases that partition by key range, such as HBase and MongoDB with ranged sharding, therefore create partitions <strong>dynamically</strong>. When a partition grows past a configured size, ten gigabytes by default for an HBase region, it is split at its middle key, and one half can move to another node. When deletions shrink it, it can be merged with a neighbour. The number of partitions follows the volume of data. One catch: an empty database starts with a single partition, so every write goes to one node until the first split. Both HBase and MongoDB let you <strong>pre-split</strong> a new table into ranges you choose when you know roughly what the keys will look like.</p>
+  <p>A third approach ties the number of partitions to the number of nodes. In Cassandra each node owns a fixed number of <strong>tokens</strong>, points on the range of hash values; 16 by default since Cassandra 4.0, and 256 before that. Each token owns the stretch of hash values just before it. A new node picks its own tokens at random and takes over the stretches in front of them, so it relieves many existing nodes a little each. Random points only balance out on average, which is why each node gets many tokens rather than one.</p>
+  <p>Drawn on a circle, with each key owned by the next token clockwise, this is usually called <strong>consistent hashing</strong>. The name is used loosely. It comes from a 1997 paper about spreading load across web caches without central coordination, and many systems that use the phrase really mean hash partitioning with randomly chosen boundaries. When in doubt, ask what is being hashed and who decides the boundaries.</p>
+
+  <p>The widget puts 1,000 keys on four nodes. Each square is one key, coloured by the node that stores it. Add or remove a node under each strategy: keys that change owner stay bright and the rest fade. The table counts the real moves for all three strategies at once, whichever one you are viewing.</p>
+
+  <figure class="widget" id="rebalance">
+    <p class="widget-title">Add a node, count the moves</p>
+    <p class="widget-sub">Pick a strategy, then add or remove nodes (between 2 and 8).</p>
+    <div class="btn-row" role="group" aria-label="Strategy">
+      <button class="btn" data-strat="modn">hash mod N</button>
+      <button class="btn" data-strat="fixed">Fixed partitions</button>
+      <button class="btn" data-strat="ring">Hash ring</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" data-act="add">Add a node</button>
+      <button class="btn" data-act="remove">Remove a node</button>
+      <button class="btn" data-act="reset">Reset</button>
+      <span class="ch6-inline" data-tokenrow role="group" aria-label="Tokens per node"><span class="ch6-rowlabel">Tokens per node</span><button class="btn" data-tokens="1">1</button><button class="btn" data-tokens="8">8</button><button class="btn" data-tokens="32">32</button></span>
+    </div>
+    <div class="ch6-mech"></div>
+    <div class="ch6-keys"></div>
+    <div class="legend" data-out="legend"></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Nodes</div><div class="stat-value" data-out="nodes"></div></div>
+      <div class="stat"><div class="stat-label">Keys moved</div><div class="stat-value" data-out="moved"></div></div>
+      <div class="stat"><div class="stat-label">Share moved</div><div class="stat-value" data-out="share"></div></div>
+      <div class="stat"><div class="stat-label">Fewest possible</div><div class="stat-value" data-out="ideal"></div></div>
+      <div class="stat"><div class="stat-label">Busiest node</div><div class="stat-value sm" data-out="busy"></div></div>
+    </div>
+    <div class="table-wrap"><table class="tradeoffs ch6-cmp">
+      <tr><th>Strategy</th><th>Keys moved by the last change</th><th>Busiest node vs average</th></tr>
+      <tr data-row="modn"><td>hash mod N</td><td data-col="moved"></td><td data-col="busy"></td></tr>
+      <tr data-row="fixed"><td>Fixed partitions (64)</td><td data-col="moved"></td><td data-col="busy"></td></tr>
+      <tr data-row="ring"><td>Hash ring</td><td data-col="moved"></td><td data-col="busy"></td></tr>
+    </table></div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>Going from N to N + 1 nodes, hash mod N moves about N/(N + 1) of the keys: four-fifths of the data when a fifth node joins. Fixed partitions and the ring move about 1/(N + 1), which is the least any scheme can do, since the new node has to end up with its share and every moved key goes to it. Fixed partitions land slightly off the ideal because whole partitions move, not single keys. Try the ring with one token per node: moves are still minimal, but the arcs are so uneven that one node can carry many times another's load.</p>
+
+  <h2>Automatic or manual</h2>
+  <p>Should the cluster rebalance itself? Fully automatic rebalancing is convenient, but moving partitions is expensive. It consumes network bandwidth and disk throughput and slows the very requests the cluster exists to serve. Combined with automatic failure detection it can be dangerous. Suppose one node is overloaded and slow to answer health checks. The cluster declares it dead and starts moving its partitions elsewhere, which adds load to the receiving nodes and to the struggling node that has to send the data. Now a second node is slow, and the cascade continues.</p>
+  <p>Many systems therefore keep a human in the loop or put brakes on the machinery. Kafka never moves partitions between brokers on its own: an operator, or a tool such as Cruise Control, produces a reassignment plan and runs it with a bandwidth throttle. MongoDB's balancer can be limited to a nightly window. Elasticsearch operators routinely disable shard allocation during a rolling restart, so that a node that is away for two minutes does not trigger a mass copy of everything it held. Automation is good at the arithmetic; a person is often better at telling a dead node from a busy one.</p>
+
+  <p class="book-ref">In the book: Chapter 6, "Rebalancing Partitions" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch6-rebalance.js"></script>
+</body>
+</html>

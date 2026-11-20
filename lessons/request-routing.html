@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Request routing · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch6.css">
+</head>
+<body data-lesson="request-routing">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Request routing</h1>
+  </header>
+
+  <p>Once data is spread over many machines, a client that wants the value for <code>cart:nia</code> has to find the one machine that holds it. The answer is a moving target: partitions migrate when nodes join, leave, or fill up, so yesterday's address for a key may be wrong today. Every partitioned database has to solve this lookup, and it has to solve it on every single request.<span class="sidenote">This is a special case of <em>service discovery</em>. Finding the machines themselves, their IP addresses, changes rarely and is usually left to DNS. Finding which machine holds which partition changes far more often.</span></p>
+
+  <h2>Three places to put the map</h2>
+  <p>The knowledge of which partition lives where can sit in one of three places.</p>
+  <p><strong>Any node forwards.</strong> Clients connect to any node, perhaps through a round-robin load balancer. If that node owns the partition, it answers. If not, it forwards the request to the node that does, waits, and relays the reply. Cassandra works like this: whichever node receives a request acts as its coordinator. Elasticsearch does the same, with every node able to coordinate a search.</p>
+  <p><strong>A routing tier.</strong> Every request goes to a layer of processes that store no data and exist only to forward requests to the right node. MongoDB's <code>mongos</code> processes play this role, and so do Vitess's VTGate servers in front of sharded MySQL.</p>
+  <p><strong>Partition-aware clients.</strong> The client library keeps the map itself and connects straight to the owner. Kafka producers fetch metadata about which broker leads each partition and then send to that broker directly. Redis Cluster clients cache a map from hash slots to nodes and fix it whenever a node tells them they guessed wrong.</p>
+  <p>Moving the knowledge closer to the client removes hops, two per request when a routing tier disappears, but puts more machinery into every client library, in every language your organisation uses.</p>
+
+  <h2>Who keeps the map</h2>
+  <p>In all three styles somebody must know the current assignment, and the participants must agree on it, or requests go astray. Getting distributed machines to agree is a hard problem in its own right, so many systems hand it to a <strong>coordination service</strong> such as ZooKeeper or etcd. Each node registers the partitions it holds. The coordination service keeps the authoritative map, and routing tiers or clients subscribe to it, which ZooKeeper calls setting a watch, so they are notified the moment it changes.</p>
+  <p>HBase and SolrCloud keep partition assignments in ZooKeeper. Kafka did too for many years and now keeps the same metadata in its own Raft-based controller quorum, called KRaft. MongoDB uses its config servers, a dedicated replica set, rather than ZooKeeper. Cassandra and Riak skip the external service and spread changes between nodes with a <strong>gossip</strong> protocol. That removes a dependency but puts more logic into every database node, and a change reaches the cluster gradually rather than all at once.</p>
+
+  <h2>The stale-routing window</h2>
+  <p>Notification is not instant. Between the moment a partition changes hands and the moment every router has heard about it, some requests are routed by the old map and reach a node that no longer owns the data. That node must not answer from whatever it has left. It either forwards the request to the new owner or replies with a redirect so the requester can retry. Redis Cluster answers with a <code>MOVED</code> error carrying the new address. In MongoDB, each request from <code>mongos</code> carries the version of the routing table it used; a shard that sees an outdated version rejects it, and <code>mongos</code> refreshes its table and retries.</p>
+  <p>The handover itself needs care too. While a partition is copied, the old owner keeps serving it, and writes that arrive during the copy are shipped to the new owner before the switch. Only then does the old owner stop accepting requests for that partition and start redirecting. A request already on its way to the old owner at that moment is redirected, not lost.</p>
+
+  <figure class="widget" id="routing">
+    <p class="widget-title">Finding the node that holds a key</p>
+    <p class="widget-sub">Six partitions on three nodes. Send some requests, then move a partition and watch the maps catch up.</p>
+    <div class="btn-row" role="group" aria-label="Routing style">
+      <button class="btn" data-mode="any">Any node forwards</button>
+      <button class="btn" data-mode="tier">Routing tier</button>
+      <button class="btn" data-mode="client">Partition-aware client</button>
+    </div>
+    <div class="btn-row" data-keys role="group" aria-label="Send a request"></div>
+    <div class="btn-row">
+      <span class="ch6-rowlabel">Move</span>
+      <select class="field ch6-select" id="rt-part" aria-label="Partition to move"></select>
+      <span class="ch6-rowlabel">to</span>
+      <select class="field ch6-select" id="rt-to" aria-label="Target node"></select>
+      <button class="btn primary" data-act="move">Move partition</button>
+      <label class="btn check"><input type="checkbox" id="rt-probe" checked> Send a request during the move</label>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="controls">
+      <div class="control"><label for="rt-delay">Map notification delay <output></output></label><input id="rt-delay" type="range" min="300" max="4000" step="100" value="1800"></div>
+    </div>
+    <div class="scroll-x"><svg viewBox="0 0 640 380" role="img" aria-label="A client, a routing tier, ZooKeeper, and three nodes holding six partitions, with requests travelling between them"></svg></div>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>request</span>
+      <span><i style="background:var(--green)"></i>reply</span>
+      <span><i style="background:var(--orange)"></i>redirect</span>
+      <span><i style="background:var(--purple)"></i>partition copy</span>
+      <span><i style="background:var(--ink-3)"></i>map update</span>
+    </div>
+    <div class="table-wrap"><table class="ch6-mini ch6-maps" data-out="maps"></table></div>
+    <ol class="steps ch6-log"></ol>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Requests answered</div><div class="stat-value" data-out="done"></div></div>
+      <div class="stat"><div class="stat-label">Hops, last request</div><div class="stat-value" data-out="hops"></div></div>
+      <div class="stat"><div class="stat-label">Detours via old owner</div><div class="stat-value" data-out="detours"></div></div>
+      <div class="stat"><div class="stat-label">Stale maps</div><div class="stat-value sm" data-out="stale"></div></div>
+    </div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>Try each style with the default settings. With a routing tier, the request sent during the move goes to node B by the old map, gets a redirect, and costs two extra hops. With partition-aware clients, the same thing happens inside the client. With any-node forwarding there is no ZooKeeper at all: node A hears about the move only when gossip reaches it, and until then it forwards to the old owner, which passes the request along. Raise the notification delay to widen the window, or turn off the request during the move and send your own.</p>
+
+  <h2>Parallel query execution</h2>
+  <p>Everything so far concerns reads and writes of a single key, which is what most partitioned key-value and document stores are built for. Analytic databases go much further. In a <strong>massively parallel processing</strong> (MPP) database such as Teradata, Amazon Redshift, or Snowflake, or in query engines such as Trino and Spark SQL, the optimizer breaks one query with joins, filters, and aggregations into stages. Each stage runs on many nodes at once, and intermediate results are repartitioned between nodes as the query proceeds. Routing there is no longer about finding one node, but about planning how data flows between all of them, which is the subject of the chapter on batch processing.</p>
+
+  <p class="book-ref">In the book: Chapter 6, "Request Routing" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch6-routing.js"></script>
+</body>
+</html>

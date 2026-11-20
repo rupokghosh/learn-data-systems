@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Partitioning and secondary indexes · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch6.css">
+</head>
+<body data-lesson="secondary-indexes">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Partitioning and secondary indexes</h1>
+  </header>
+
+  <p>Partitioning by primary key works because every lookup names the key, and the key alone says where the record lives. Real applications also ask questions by other attributes: every listing in Lisbon, every order containing a given product, every message that mentions a word. Answering those quickly needs a <strong>secondary index</strong>, the bread and butter of relational databases and the entire reason search engines exist.</p>
+  <p>Secondary indexes do not fit neatly onto partitions. The primary key decides where a record is stored, and the indexed value has nothing to do with that decision. Take a holiday rental site whose listings are partitioned by listing ID, with guests filtering by city. Listings in Lisbon can be on any partition, so the index has to be split up somehow too. There are two broad ways to do it.</p>
+
+  <h2>Local indexes: one per partition</h2>
+  <p>In the first approach, each partition keeps its own secondary index covering only the listings it holds. Adding, changing, or removing a listing touches only the partition that owns its ID: the document and its index entries change in one local write, which can be atomic. Because the index is split the same way as the documents, this is called a <strong>document-partitioned</strong> or <strong>local</strong> index.</p>
+  <p>The cost lands on reads. A listing's ID says nothing about its city, so a query by city has to be sent to every partition and the partial results combined. This pattern is called <strong>scatter/gather</strong>. Each partition does a small, cheap lookup, but the query as a whole waits for the slowest reply. If one partition in a hundred happens to be in a garbage collection pause or busy with compaction, a query that fans out to fifty partitions meets at least one such straggler about 40 percent of the time.<span class="sidenote">1 − 0.99<sup>50</sup> ≈ 0.39. The more partitions a read must wait for, the more its latency is set by the slowest of them.</span></p>
+  <p>Local indexes are the common default. Elasticsearch sends a search to one copy of every shard and merges the best hits from each. Cassandra's built-in secondary indexes and MongoDB's indexes on a sharded collection are also local to each partition. The practical defence against scatter/gather is to choose a partition key that your most frequent queries include. If nearly every search on the rental site is within one city, partitioning listings by city turns those searches into single-partition reads and leaves fan-out for the rare query that spans cities.</p>
+
+  <h2>Global indexes: partitioned by term</h2>
+  <p>The alternative is one index that covers every listing, partitioned separately from the listings. Entries for cities from A to J might live on partition 0, cities starting with K on partition 1, and so on. The index is split by the value being looked up, which search engines call a term, so this is a <strong>term-partitioned</strong> or <strong>global</strong> index. Splitting terms by range keeps range queries over values such as price efficient; splitting by a hash of the term spreads load more evenly.</p>
+  <p>Reads become cheap. A query for Lisbon asks the single partition that holds the Lisbon entry. If the entry carries a copy of the fields the query needs, nothing else is contacted. Otherwise the reader fetches each matching listing from its own partition, which is still more targeted than asking everyone.</p>
+  <p>Writes become expensive. A new listing is stored on the partition that owns its ID, but its index entry belongs to the partition that owns its city, often on another machine. Moving a listing to a different city touches up to three partitions: the listing itself, the entry for the old city, and the entry for the new one. Keeping all of them exactly in step needs a distributed transaction, which most databases avoid for index maintenance. Instead, global index updates are usually <strong>asynchronous</strong>: the write is acknowledged once the listing is stored, and the index catches up a moment later.</p>
+
+  <figure class="widget" id="sec-index">
+    <p class="widget-title">Querying rental listings by city</p>
+    <p class="widget-sub">Twenty listings, partitioned by ID. Query by city or write a listing, and watch which partitions take part.</p>
+    <div class="btn-row" role="group" aria-label="Index type">
+      <button class="btn" data-mode="local">Local index</button>
+      <button class="btn" data-mode="global">Global index</button>
+    </div>
+    <div class="btn-row" data-cities role="group" aria-label="Find listings in"><span class="ch6-rowlabel">Find listings in</span></div>
+    <div class="btn-row">
+      <button class="btn" data-act="add">Add a listing</button>
+      <button class="btn" data-act="move">Change a listing's city</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="controls">
+      <div class="control"><label for="sec-lag">Global index lag <output></output></label><input id="sec-lag" type="range" min="0" max="4000" step="250" value="2000"></div>
+    </div>
+    <div class="ch6-stage">
+      <div class="ch6-client"><div class="ch6-client-title">Application</div><div class="ch6-client-out" data-out="result"></div></div>
+      <div class="ch6-parts"></div>
+      <svg class="ch6-overlay" aria-hidden="true"></svg>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>request</span>
+      <span><i style="background:var(--green)"></i>reply</span>
+      <span><i style="background:var(--orange)"></i>asynchronous index update</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Partitions read, last query</div><div class="stat-value" data-out="read"></div></div>
+      <div class="stat"><div class="stat-label">Partitions written, last write</div><div class="stat-value" data-out="write"></div></div>
+      <div class="stat"><div class="stat-label">Query latency</div><div class="stat-value" data-out="lat"></div></div>
+      <div class="stat"><div class="stat-label">Index updates in flight</div><div class="stat-value" data-out="flight"></div></div>
+    </div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>In global mode, change a listing's city and query the new city straight away: the listing is stored, the write was acknowledged, and yet the index does not know about it. That window is what asynchronous maintenance costs. Amazon DynamoDB works this way: its global secondary indexes are updated asynchronously, usually within a fraction of a second, and reads from them are only eventually consistent. Its local secondary indexes live next to the items they cover and support strongly consistent reads. Distributed SQL databases such as CockroachDB and Google Spanner take the other road and update a global index in the same transaction as the row, so index reads are consistent and writes pay for a cross-partition commit.</p>
+
+  <h2>Choosing between them</h2>
+  <div class="table-wrap"><table class="tradeoffs">
+    <tr><th></th><th>Local (by document)</th><th>Global (by term)</th></tr>
+    <tr><td>Partitions read per query</td><td>All of them</td><td>One, plus any document fetches</td></tr>
+    <tr><td>Partitions written per change</td><td>One</td><td>Up to three</td></tr>
+    <tr><td>Index freshness</td><td>Updated with the data, atomically</td><td>Usually lags the data</td></tr>
+    <tr><td>Query latency set by</td><td>The slowest partition</td><td>One partition</td></tr>
+    <tr><td>Examples</td><td>Elasticsearch, Cassandra, MongoDB, DynamoDB local indexes</td><td>DynamoDB global indexes; CockroachDB and Spanner, synchronously</td></tr>
+  </table></div>
+  <p>Local indexes suit write-heavy data where queries by the secondary attribute are rare, can include the partition key, or can tolerate fan-out. A global index pays off when the secondary lookup is a hot read path, as long as the application can live with a read that briefly misses a fresh write, or the database is willing to pay for a transaction on every write. Either way, every index you add is a cost on writes, and on a partitioned database that cost is measured in machines as well as in disk.</p>
+
+  <p class="book-ref">In the book: Chapter 6, "Partitioning and Secondary Indexes" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch6-secondary.js"></script>
+</body>
+</html>

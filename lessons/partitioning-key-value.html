@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Partitioning key-value data · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch6.css">
+</head>
+<body data-lesson="partitioning-key-value">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Partitioning key-value data</h1>
+  </header>
+
+  <p>Replication puts copies of the same data on several machines. That helps when a machine dies or when reads pile up, but every copy still holds everything. Once the dataset, or the rate of writes into it, outgrows what one machine can store or absorb, you have to split the data itself. Each record then belongs to exactly one <strong>partition</strong>, and different partitions live on different machines.<span class="sidenote">This kind of partitioning is a deliberate split for scale. It has nothing to do with a <em>network partition</em>, which is a fault.</span></p>
+  <p>The names vary more than the idea. MongoDB and Elasticsearch call a partition a shard, HBase calls it a region, Bigtable a tablet, and Cassandra and Riak talk about vnodes. The goal is always the same: spread data and queries evenly, so that ten machines can carry roughly ten times the load of one.</p>
+
+  <h2>Partitions and replicas</h2>
+  <p>In practice the two techniques are combined. Each partition is replicated, so a record lives in one partition but on several machines, and a single machine holds replicas of several partitions. With leader-based replication, a node can lead some partitions and follow others at the same time. Because the replication schemes of the previous chapter apply to each partition unchanged, the rest of this chapter can mostly ignore replicas.</p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 170" role="img" aria-label="Four nodes. Node 1 leads P1 and follows P3 and P4. Node 2 leads P2 and follows P4 and P1. Node 3 leads P3 and follows P1 and P2. Node 4 leads P4 and follows P2 and P3.">
+      <g class="ch6-rep">
+        <g transform="translate(0,0)">
+          <rect class="node" x="0" y="0" width="148" height="150" rx="10"/>
+          <text class="nname" x="14" y="24">Node 1</text>
+          <rect class="lead" x="14" y="38" width="120" height="28" rx="5"/><text x="26" y="57">P1 <tspan class="role">leader</tspan></text>
+          <rect class="fol" x="14" y="72" width="120" height="28" rx="5"/><text x="26" y="91">P3 <tspan class="role">follower</tspan></text>
+          <rect class="fol" x="14" y="106" width="120" height="28" rx="5"/><text x="26" y="125">P4 <tspan class="role">follower</tspan></text>
+        </g>
+        <g transform="translate(164,0)">
+          <rect class="node" x="0" y="0" width="148" height="150" rx="10"/>
+          <text class="nname" x="14" y="24">Node 2</text>
+          <rect class="lead" x="14" y="38" width="120" height="28" rx="5"/><text x="26" y="57">P2 <tspan class="role">leader</tspan></text>
+          <rect class="fol" x="14" y="72" width="120" height="28" rx="5"/><text x="26" y="91">P4 <tspan class="role">follower</tspan></text>
+          <rect class="fol" x="14" y="106" width="120" height="28" rx="5"/><text x="26" y="125">P1 <tspan class="role">follower</tspan></text>
+        </g>
+        <g transform="translate(328,0)">
+          <rect class="node" x="0" y="0" width="148" height="150" rx="10"/>
+          <text class="nname" x="14" y="24">Node 3</text>
+          <rect class="lead" x="14" y="38" width="120" height="28" rx="5"/><text x="26" y="57">P3 <tspan class="role">leader</tspan></text>
+          <rect class="fol" x="14" y="72" width="120" height="28" rx="5"/><text x="26" y="91">P1 <tspan class="role">follower</tspan></text>
+          <rect class="fol" x="14" y="106" width="120" height="28" rx="5"/><text x="26" y="125">P2 <tspan class="role">follower</tspan></text>
+        </g>
+        <g transform="translate(492,0)">
+          <rect class="node" x="0" y="0" width="148" height="150" rx="10"/>
+          <text class="nname" x="14" y="24">Node 4</text>
+          <rect class="lead" x="14" y="38" width="120" height="28" rx="5"/><text x="26" y="57">P4 <tspan class="role">leader</tspan></text>
+          <rect class="fol" x="14" y="72" width="120" height="28" rx="5"/><text x="26" y="91">P2 <tspan class="role">follower</tspan></text>
+          <rect class="fol" x="14" y="106" width="120" height="28" rx="5"/><text x="26" y="125">P3 <tspan class="role">follower</tspan></text>
+        </g>
+      </g>
+    </svg>
+    </div>
+    <figcaption>Four partitions with three replicas each, spread over four nodes. Every node leads one partition and follows two, so leader work is shared, and losing any one node still leaves two copies of every partition.</figcaption>
+  </figure>
+
+  <p>The real question is which partition a record belongs to. If the rule is unfair, some partitions receive more data or more queries than others. That is <strong>skew</strong>, and its extreme form is a <strong>hot spot</strong>: one partition doing nearly all the work while its neighbours idle. Placing each record on a random node would spread data perfectly, but then a reader looking for a key would have to ask every node. The rule has to be something a reader can repeat.</p>
+
+  <h2>Splitting by key range</h2>
+  <p>One rule gives each partition a continuous range of keys, the way a phone book might be bound in volumes A to D, E to J, and so on. If you know where each range starts and ends, you know which partition to ask. The ranges need not be equally wide; they need to hold about the same amount of data. Orders keyed by customer surname would need narrow ranges around common initial letters and wide ones where names are rare. An administrator can set the boundaries, or the database can choose them, as Bigtable and HBase do.</p>
+  <p>Inside a partition, keys can be kept sorted, as in an SSTable or a B-tree, so <strong>range scans</strong> are cheap. If the key is a timestamp, "every reading between 14:00 and 14:30" is one contiguous slice of one partition, or of a few neighbouring ones.</p>
+  <p>The weakness is that traffic can follow the key order. If the key is the time an event occurred, every new event sorts after all earlier ones, so every write goes to the partition that holds the latest range while older partitions receive nothing. The usual fix is to put something else first, such as the ID of the device that produced the event. Writes from many devices then land in many ranges. The cost moves to the reader: a question about all devices in one time window becomes one range scan per device.</p>
+
+  <h2>Splitting by hash of the key</h2>
+  <p>The other common rule runs the key through a hash function and gives each partition a range of hash values. A good hash turns skewed input into evenly spread output: two keys that differ in one character get unrelated hashes. The function does not have to be cryptographically strong; Cassandra uses Murmur3 and MongoDB uses MD5. It does have to give the same answer in every process.<span class="sidenote">Python's built-in <code>hash()</code> on strings is seeded randomly per process, so two servers using it would disagree about where a key lives.</span></p>
+  <p>Hashing fixes the timestamp problem, because consecutive timestamps scatter across all partitions. It also destroys what made key ranges useful. Keys that were neighbours are now in unrelated places, so a range query has no choice but to ask every partition. In MongoDB's hashed sharding mode, for example, a range query on the shard key is broadcast to all shards.</p>
+  <p>Cassandra offers a middle path through <strong>compound keys</strong>. Only the first part of the primary key, the partition key, is hashed to pick a partition. The remaining columns, called clustering columns, set the sort order inside it.</p>
+<pre><code>CREATE TABLE readings (
+  sensor_id text,
+  taken_at  timestamp,
+  celsius   double,
+  PRIMARY KEY ((sensor_id), taken_at)
+);</code></pre>
+  <p>Readings from one sensor live together and sorted by time, so "what did sensor s137 report between 14:00 and 14:30?" reads one slice of one partition, while thousands of sensors still spread over the cluster. What you give up is the same question across all sensors at once, which again has to ask every partition.</p>
+
+  <p>The widget routes a live stream of writes to eight partitions. Pick a key pattern and a scheme, and watch each partition's share of recent writes. The row of marks under the bars shows which partitions the range scan named below the chart has to read.</p>
+
+  <figure class="widget" id="kv-stream">
+    <p class="widget-title">Where the writes land</p>
+    <p class="widget-sub">Bars show each partition's share of the last 3,000 writes. The dashed line is a fair share, one eighth.</p>
+    <div class="btn-row" role="group" aria-label="Key pattern">
+      <button class="btn" data-wl="uniform">Uniform user IDs</button>
+      <button class="btn" data-wl="time">Timestamps</button>
+      <button class="btn" data-wl="sensor">Sensor, then timestamp</button>
+      <button class="btn" data-wl="celeb">One celebrity key</button>
+      <button class="btn" data-wl="zipf">Zipf-like skew</button>
+    </div>
+    <div class="btn-row" role="group" aria-label="Partitioning scheme">
+      <button class="btn" data-scheme="range">Key range</button>
+      <button class="btn" data-scheme="hash">Hash of key</button>
+      <label class="btn check"><input type="checkbox" id="kv-salt"> Salt the hot key</label>
+      <button class="btn" data-act="pause">Pause stream</button>
+    </div>
+    <div class="controls">
+      <div class="control"><label for="kv-saltn">Suffixes per hot key <output></output></label><input id="kv-saltn" type="range" min="2" max="32" step="1" value="8"></div>
+    </div>
+    <div class="chart"></div>
+    <p class="note"><span data-out="rule"></span><br>Scan: <span data-out="query"></span>. Marked partitions must be read.</p>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Hottest partition</div><div class="stat-value" data-out="hot"></div></div>
+      <div class="stat"><div class="stat-label">Versus fair share</div><div class="stat-value" data-out="ratio"></div></div>
+      <div class="stat"><div class="stat-label">Scan touches</div><div class="stat-value" data-out="scan"></div></div>
+      <div class="stat"><div class="stat-label">Reading the hot key</div><div class="stat-value sm" data-out="reads"></div></div>
+    </div>
+    <div class="verdict"></div>
+  </figure>
+
+  <h2>Hot keys and skewed workloads</h2>
+  <p>Hashing spreads keys, not requests. When one key is far more popular than the rest, every request for it still lands on the partition that owns it. Picture a ticketing site in the minute a stadium tour goes on sale, with a large fraction of all writes aimed at one event ID. No partitioning rule can split a single key, because the whole point of the rule is that a key always maps to the same place. Real traffic is often shaped like the Zipf-like pattern above: no single celebrity, but a long tail with a few keys far busier than the rest.</p>
+  <p>Most databases leave this problem to the application. A common trick is to <strong>salt</strong> the hot key with a small random suffix, so that writes to event 7781 become writes to <code>7781#00</code> through <code>7781#31</code>, which hash to different partitions. Choose the celebrity key above, switch to hash partitioning, and tick the box to see the load spread.</p>
+  <p>Salting moves the cost to reads. Fetching the event now means reading every salted key and merging the results, and the application has to track which keys are salted, since salting the many keys with ordinary traffic would only multiply their read cost. With key ranges, a suffix does nothing at all: the salted keys sort next to each other and stay inside one range, so the random part would have to go at the front of the key. Some managed services react to heat on their own; Amazon DynamoDB can split a busy partition, but even it cannot spread one item across machines. For a key you expect to be hot, the decision is still yours, and it depends on knowing your traffic.</p>
+
+  <p class="book-ref">In the book: Chapter 6, "Partitioning of Key-Value Data" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch6-kv.js"></script>
+</body>
+</html>

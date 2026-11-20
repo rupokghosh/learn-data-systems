@@ -1,0 +1,107 @@
+/* =========================================================
+   Chapter 6: partitioning visuals.
+   Loaded after style.css. Colors only via its variables.
+   ========================================================= */
+
+.ch6-rowlabel { font: 13px/1.4 var(--sans); color: var(--ink-3); margin-right: 2px; }
+.ch6-inline { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ch6-inline[hidden] { display: none; }
+.ch6-dim { color: var(--ink-4); font-size: 11px; }
+.btn[aria-pressed="true"] .ch6-dim { color: inherit; opacity: 0.7; }
+label.btn.is-off { opacity: 0.4; cursor: default; }
+select.ch6-select { font: 13px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; height: 30px; padding: 0 8px; }
+
+/* ---------- Lesson 1: partitions and replicas (static) ---------- */
+.ch6-rep .node { fill: var(--surface-2); stroke: var(--line-2); }
+.ch6-rep .lead { fill: var(--accent-soft); stroke: var(--accent); }
+.ch6-rep .fol { fill: var(--bg); stroke: var(--line-2); }
+.ch6-rep text { fill: var(--ink); font: 500 13px var(--sans); }
+.ch6-rep .nname { fill: var(--ink-2); font-weight: 600; }
+.ch6-rep .role { fill: var(--ink-3); font-weight: 400; font-size: 12px; }
+
+/* ---------- Lesson 1: write stream chart ---------- */
+.chart .ch6-axis { fill: var(--ink-3); font-size: 11px; }
+.chart .ch6-src { fill: var(--ink-2); font: 12px var(--mono); }
+.chart .ch6-val { fill: var(--ink-2); font-size: 11px; }
+.ch6-bar { fill: var(--accent); opacity: 0.8; transition: fill 200ms ease; }
+.ch6-bar.hot { fill: var(--orange); opacity: 1; }
+.ch6-fair { stroke: var(--ink-3); stroke-dasharray: 4 4; }
+.ch6-mark { fill: var(--surface-2); stroke: var(--line-2); transition: fill 200ms ease, stroke 200ms ease; }
+.ch6-mark.on { fill: var(--orange-soft); stroke: var(--orange); }
+.ch6-dot { fill: var(--accent); }
+.ch6-dot.hot { fill: var(--orange); }
+
+/* ---------- Lesson 2: secondary index stage ---------- */
+.ch6-stage { position: relative; }
+.ch6-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.ch6-flydot.req { fill: var(--accent); }
+.ch6-flydot.res { fill: var(--green); }
+.ch6-flydot.idx { fill: var(--orange); }
+.ch6-client { max-width: 360px; margin: 0 auto 28px; padding: 9px 12px; border: 1px solid var(--line-2); border-radius: 8px; text-align: center; background: var(--bg); }
+.ch6-client-title { font: 500 13px/1.3 var(--sans); color: var(--ink); }
+.ch6-client-out { font: 12px/1.45 var(--sans); color: var(--ink-3); margin-top: 3px; min-height: 1.45em; }
+.ch6-parts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 620px) { .ch6-parts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ch6-part { border: 1px dashed var(--line-2); border-radius: 8px; padding: 8px; min-width: 0; transition: border-color 200ms ease, background-color 200ms ease; }
+.ch6-part.probe { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
+.ch6-part-head { display: flex; justify-content: space-between; gap: 6px; font: 500 12px/1.3 var(--sans); color: var(--ink); }
+.ch6-part-head .lat { font-weight: 400; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ch6-part-head .lat.slow { color: var(--red); font-weight: 500; }
+.ch6-part-sub { font: 11px/1.3 var(--sans); color: var(--ink-3); margin: 2px 0 6px; }
+.ch6-docs { display: flex; flex-wrap: wrap; gap: 3px; }
+.ch6-docs .rec { padding: 3px 5px; font-size: 11px; gap: 4px; }
+.ch6-idx { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
+.ch6-idx-title { font: 11px/1.3 var(--sans); color: var(--ink-3); margin-bottom: 3px; }
+.ch6-idx-row { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 4px; font: 11px/1.45 var(--mono); padding: 1px 3px; border-radius: 3px; transition: background-color 200ms ease; }
+.ch6-idx-row .t { color: var(--ink); font-family: var(--sans); }
+.ch6-idx-row .ids { color: var(--ink-3); overflow-wrap: anywhere; }
+.ch6-idx-row.hl { background: var(--accent-soft); }
+.ch6-idx-row.hl .ids { color: var(--ink); }
+.ch6-idx-row.pending { background: var(--orange-soft); }
+.ch6-idx-row .pend { color: var(--orange); font-weight: 500; }
+
+/* ---------- Lesson 3: rebalancing ---------- */
+.ch6-mech { margin-bottom: 12px; overflow-x: auto; display: flex; flex-direction: column; align-items: center; }
+.ch6-mech > table, .ch6-mech > .ch6-pstrip, .ch6-mech > .note { align-self: stretch; }
+.ch6-keys svg { display: block; width: 100%; }
+.ch6-cell { transition: fill 320ms ease, opacity 200ms ease; }
+.ch6-cell.still { opacity: 0.22; }
+.ch6-cell.moved { stroke: var(--ink); stroke-width: 1; }
+.ch6-sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: 0; }
+table.ch6-mini { border-collapse: collapse; font: 12px/1.3 var(--mono); width: 100%; }
+.ch6-mini th { font: 500 11px var(--sans); color: var(--ink-3); text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+.ch6-mini td { padding: 4px 6px; border-bottom: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; transition: background-color 200ms ease; }
+.ch6-mini tr.mv td { background: var(--orange-soft); }
+.ch6-pstrip { display: grid; grid-template-columns: repeat(16, minmax(0, 1fr)); gap: 3px; }
+.ch6-pcell { font: 9px/18px var(--mono); text-align: center; color: var(--bg); border-radius: 3px; height: 18px; overflow: hidden; transition: background-color 320ms ease, opacity 200ms ease; }
+.ch6-pcell.still { opacity: 0.3; }
+.ch6-pcell.moved { box-shadow: 0 0 0 1.5px var(--ink); }
+.ch6-ring { display: block; overflow: visible; }
+.ch6-arc { fill: none; stroke-width: 6; opacity: 0.55; }
+.ch6-rkey { transition: opacity 200ms ease; }
+.ch6-rkey.still { opacity: 0.25; }
+.ch6-tok { stroke-width: 2.5; }
+.ch6-ring-t { fill: var(--ink); font: 500 13px var(--sans); }
+.ch6-ring-s { fill: var(--ink-3); font: 11px var(--sans); }
+.ch6-cmp tr.sel td { color: var(--ink); font-weight: 500; }
+
+/* ---------- Lesson 4: request routing ---------- */
+.ch6-edge { stroke: var(--line-2); }
+.ch6-rt { transition: opacity 200ms ease; }
+.ch6-rt.off { opacity: 0.35; }
+.ch6-pchip { fill: var(--surface-2); stroke: var(--line-2); transition: fill 200ms ease, stroke 200ms ease; }
+.ch6-pchip.out { fill: var(--purple); fill-opacity: 0.12; stroke: var(--purple); }
+.ch6-pchip.in { fill: none; stroke: var(--purple); stroke-dasharray: 3 3; }
+.ch6-pchip-t { fill: var(--ink); font: 500 11px var(--mono); }
+.ch6-inflight { fill: none; stroke-width: 2; opacity: 0.45; }
+.ch6-copy { fill: var(--purple); }
+.ch6-copy-t { fill: var(--bg); font: 500 10px var(--mono); }
+.ch6-msg-t { fill: var(--ink-2); font: 500 10px var(--mono); }
+.ch6-maps { margin-top: 4px; }
+.ch6-maps td:not(:first-child), .ch6-maps th:not(:first-child) { text-align: center; }
+.ch6-maps td:first-child { font-family: var(--sans); color: var(--ink-3); }
+.ch6-maps tr:nth-child(2) td { color: var(--ink); font-weight: 500; }
+.ch6-maps td.stale { background: var(--orange-soft); color: var(--orange); font-weight: 500; }
+.ch6-log li.warn { color: var(--orange); }
+.ch6-log li.warn.current { color: var(--orange); font-weight: 500; }
+.ch6-log { min-height: 9em; }
