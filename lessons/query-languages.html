@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Declarative and imperative queries · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch2.css">
+</head>
+<body data-lesson="query-languages">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Declarative and imperative queries</h1>
+  </header>
+
+  <p>The relational model did not only change how data was stored. It changed how you ask for it. Databases before it, such as IBM's IMS and the CODASYL systems, were queried with imperative code: the program stepped from record to record, following pointers, in an order the programmer chose. SQL is declarative. You describe the result you want, the conditions it must meet and the shape it should have, and the database works out how to produce it.<span class="sidenote">SQL follows the structure of Codd's <em>relational algebra</em> fairly closely: selection, projection, and joins over sets of rows, with no notion of a loop.</span></p>
+
+  <p>That sounds like a matter of taste. It is not. Leaving out the "how" is exactly what lets the database get faster without anyone rewriting their queries.</p>
+
+  <h2>Saying what, not how</h2>
+
+  <p>Here is the same question asked both ways: which products cost less than $15 and are in stock?</p>
+
+  <div class="split-wrap">
+    <div class="code-pair">
+<pre><code>// Imperative: a recipe
+const cheap = [];
+for (let i = 0; i &lt; products.length; i++) {
+  const p = products[i];
+  if (p.price &lt; 15 &amp;&amp; p.inStock) {
+    cheap.push(p.name);
+  }
+}</code></pre>
+<pre><code>-- Declarative: a description
+SELECT name
+FROM products
+WHERE price &lt; 15
+  AND in_stock;</code></pre>
+    </div>
+  </div>
+
+  <p>The loop commits to a lot. Start at element zero. Look at each element in turn. Append matches to the array in the order you find them. The SQL commits to almost nothing: it does not say which rows to look at first, whether to use an index, how many CPU cores to use, or what order the answers come back in. Watch what the database does with that freedom.</p>
+
+  <figure class="widget" id="plan">
+    <p class="widget-title">Twenty-four products, one question, two ways</p>
+    <p class="widget-sub">Both run on the same clock. One step means one worker examines one product. Change what the database has available, and the planner picks a different strategy for the same SQL.</p>
+    <div class="controls">
+      <div class="control"><label for="workers">Workers the database may use <output></output></label><input id="workers" type="range" min="0" max="3" step="1" value="2"></div>
+      <div class="control" style="display:flex;align-items:end"><label class="btn check" style="margin:0"><input type="checkbox" id="has-index"> Index on price exists</label></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" data-run>Run both</button>
+      <button class="btn" data-reset>Reset</button>
+    </div>
+    <div class="qpanel" data-panel="imp">
+      <div class="qhead"><span class="t">Imperative loop</span><span class="c" data-count></span></div>
+      <div class="items" data-lane></div>
+      <p class="results" data-results></p>
+    </div>
+    <div class="qpanel" data-panel="dec">
+      <div class="qhead"><span class="t">Declarative query</span><span class="c" data-count></span></div>
+      <div class="plan" data-plan aria-label="Query plan"></div>
+      <p class="note" data-why style="margin:-2px 0 10px"></p>
+      <div data-lanes></div>
+      <p class="results" data-results></p>
+    </div>
+    <div class="legend"><span><i style="background:var(--accent-soft);border:1px solid var(--accent)"></i>being examined</span><span><i style="background:var(--green-soft);border:1px solid var(--green)"></i>matches</span><span><i style="background:var(--surface-2);border:1px solid var(--line-2);opacity:.5"></i>examined, no match</span></div>
+    <div class="verdict" hidden></div>
+  </figure>
+
+  <p>Both strategies return the same six products. But notice the order. The loop returns them in the order they sit in the array, because that is what the code says. The parallel query returns them in whatever order the workers happen to find them, and the index scan returns them sorted by price. All three are correct, because the SQL never asked for an order. If you need one, you say so with <code>ORDER BY</code>, and the planner takes that into account too.</p>
+
+  <h2>Why leaving things out helps</h2>
+
+  <p>A declarative query hands three decisions to the database, and each one is a chance to improve without touching application code.</p>
+
+  <p><strong>The access path.</strong> The query optimizer chooses between scanning the whole table and using an index, picks the order of joins, and decides which join algorithm to use, based on statistics about the data. When the table grows from a thousand rows to a hundred million, the plan changes; the query text does not. You can add an index next year and every existing query that benefits will start using it.<span class="sidenote">Run <code>EXPLAIN</code> in front of a query in PostgreSQL or MySQL to see the plan the optimizer chose. The plan shown in the widget imitates PostgreSQL's format.</span></p>
+
+  <p><strong>The physical layout.</strong> Because no query depends on where rows live or what order they are stored in, the database can reorganize storage, compress pages, or reclaim space without breaking anyone. An imperative program that relied on rows arriving in insertion order would break the moment the storage engine moved them.</p>
+
+  <p><strong>Parallelism.</strong> CPUs now get faster mainly by adding cores. Imperative code describes a sequence of steps, and each step might depend on the one before, so it is hard to split safely across cores or machines. A declarative query only describes a pattern the result must match, so the database is free to split the work. PostgreSQL added parallel sequential scans in version 9.6 and turned them on by default in version 10. Queries that could benefit did so without anyone rewriting them.</p>
+
+  <p>The trade-off is control. Sometimes the optimizer picks badly, and you end up nudging it with indexes, rewritten queries, or hints. And some computations are awkward to state declaratively at all. That is why most systems let you drop down to imperative code when you must, but treat it as the exception.</p>
+
+  <h2>The same idea in the browser</h2>
+
+  <p>Declarative languages are not unique to databases. Suppose a billing page should show the amount in red for every overdue invoice. In CSS that is one rule:</p>
+
+<pre><code>tr.overdue td.amount { color: crimson; }</code></pre>
+
+  <p>The imperative version walks the DOM and sets styles by hand:</p>
+
+<pre><code>for (const row of document.getElementsByTagName("tr")) {
+  if (!row.classList.contains("overdue")) continue;
+  for (const cell of row.children) {
+    if (cell.classList.contains("amount")) cell.style.color = "crimson";
+  }
+}</code></pre>
+
+  <p>The loop runs once. When an invoice is paid and loses its <code>overdue</code> class, its amount stays red until you write more code to undo it. When new rows arrive, someone must remember to run the loop again. The CSS rule simply keeps describing what should be true, and the browser keeps it true. Browser engines are also free to match selectors however they like; Firefox, for example, computes styles in parallel across cores.</p>
+
+  <h2>MapReduce: somewhere in between</h2>
+
+  <p>MapReduce, popularized by Google and by Hadoop, sits between the two styles. You write two small functions in an ordinary programming language, and the framework decides where and in what order to run them across many machines. Here is monthly revenue from paid orders, using MongoDB's <code>mapReduce</code>:</p>
+
+<pre><code>db.orders.mapReduce(
+  function () { emit(this.placedAt.toISOString().slice(0, 7), this.total); },
+  function (month, totals) { return Array.sum(totals); },
+  { query: { status: "paid" }, out: "revenue_by_month" }
+);</code></pre>
+
+  <p>The functions must be pure: they may not touch anything outside their inputs, and the reduce function must give the same answer however its inputs are grouped, because the framework may call it several times on partial results. That restriction is what lets the framework run the functions anywhere, in any order, and rerun them after a machine fails.<span class="sidenote">The <code>query</code> option is a small declarative filter applied before the map step, so even this API mixes the two styles.</span></p>
+
+  <p>But writing two carefully coordinated functions is harder than writing one query, and the database cannot look inside a JavaScript function to optimize it. So MongoDB added the aggregation pipeline, a declarative query language written as JSON, and has deprecated <code>mapReduce</code> in its favor since version 5.0:</p>
+
+<pre><code>db.orders.aggregate([
+  { $match: { status: "paid" } },
+  { $group: {
+      _id: { $dateToString: { format: "%Y-%m", date: "$placedAt" } },
+      revenue: { $sum: "$total" } } }
+]);</code></pre>
+
+  <p>Put that next to the SQL version, and the family resemblance is hard to miss:</p>
+
+<pre><code>SELECT to_char(placed_at, 'YYYY-MM') AS month, sum(total) AS revenue
+FROM orders
+WHERE status = 'paid'
+GROUP BY month;</code></pre>
+
+  <p>A system that started out avoiding SQL ended up reinventing a declarative query language, because that is what lets the database do the optimizing.</p>
+
+  <p class="book-ref">In the book: Chapter 2, "Query Languages for Data", including "Declarative Queries on the Web" and "MapReduce Querying" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch2-query.js"></script>
+</body>
+</html>

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graph-like data models · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch2.css">
+</head>
+<body data-lesson="graph-models">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Graph-like data models</h1>
+  </header>
+
+  <p>Documents handle trees well. Relational tables handle a moderate amount of linking well. But when almost anything in your data can connect to almost anything else, and the interesting questions are about the connections themselves, it is often more natural to model the data as a graph.</p>
+
+  <p>A graph has two kinds of things: <strong>vertices</strong>, also called nodes or entities, and <strong>edges</strong>, also called relationships. People and who follows whom, web pages and the links between them, rail stations and the tracks that join them are all classic graphs. A graph also does not need to hold only one kind of thing. A single graph can store people, places, events, and posts, with different kinds of edges between them.<span class="sidenote">Facebook's TAO, for example, stores users, posts, photos, check-ins, and comments as one large graph of objects and typed associations.</span></p>
+
+  <h2>Vertices, edges, and properties</h2>
+
+  <p>The most common variant is the <strong>property graph</strong>, used by Neo4j, Memgraph, and Amazon Neptune, among others. Each vertex has a unique ID, a label saying what kind of thing it is, such as <code>Person</code> or <code>City</code>, and a set of properties as key-value pairs. Each edge has a unique ID, a <em>tail</em> vertex where it starts, a <em>head</em> vertex where it ends, a label naming the relationship, such as <code>BORN_IN</code>, and its own properties.</p>
+
+  <p>You can picture the whole model as two relational tables:</p>
+
+<pre><code>CREATE TABLE vertices (id bigint PRIMARY KEY, label text, properties jsonb);
+CREATE TABLE edges (
+  id         bigint PRIMARY KEY,
+  tail       bigint REFERENCES vertices (id),
+  head       bigint REFERENCES vertices (id),
+  label      text,
+  properties jsonb
+);
+CREATE INDEX edges_by_tail ON edges (tail);
+CREATE INDEX edges_by_head ON edges (head);</code></pre>
+
+  <p>Three things make this simple shape powerful. Any vertex can connect to any other, with no schema limiting which kinds may be linked. The two indexes let you find a vertex's outgoing and incoming edges quickly, so you can walk the graph in either direction. And labels let one graph hold many kinds of relationship without them getting tangled.</p>
+
+  <p>Geography shows why the flexibility matters. Places nest inside each other, but not uniformly. Lisbon sits inside the Lisbon District, which sits inside Portugal; Porto is recorded directly under Portugal. Some countries have states, others provinces or prefectures, and some records only know the region, not the city. A table with fixed <code>city</code>, <code>region</code>, and <code>country</code> columns fights that variety. A graph just adds <code>WITHIN</code> edges, as many as each place needs.</p>
+
+  <h2>Pattern queries in Cypher</h2>
+
+  <p>Cypher is the declarative query language created for Neo4j, now implemented by several other databases, and the main influence on GQL, the ISO standard graph query language published in 2024. A Cypher query draws the pattern you are looking for in ASCII art: <code>(p:Person)</code> is a vertex with a label, and <code>-[:BORN_IN]-&gt;</code> is an edge with a direction.</p>
+
+  <p>Here is a question that is hard to ask of a fixed-column table: which people were born in one country and now live in a country on a different continent?</p>
+
+  <figure class="widget wide" id="graph">
+    <p class="widget-title">Who moved to another continent?</p>
+    <p class="widget-sub">Every edge points from a person, or a smaller place, toward a bigger one. Run the query to watch it follow edges one hop at a time. Then move an edge and run it again.</p>
+<pre class="code"><code>MATCH
+  (p:Person) -[:BORN_IN]-&gt;  () -[:WITHIN*0..]-&gt; (home:Country) -[:WITHIN]-&gt; (c1:Continent),
+  (p)        -[:LIVES_IN]-&gt; () -[:WITHIN*0..]-&gt; (now:Country)  -[:WITHIN]-&gt; (c2:Continent)
+WHERE c1 &lt;&gt; c2
+RETURN p.name, home.name, now.name</code></pre>
+    <div class="btn-row">
+      <button class="btn primary" data-run>Run query</button>
+      <button class="btn" data-skip disabled>Skip to result</button>
+      <button class="btn" data-reset>Reset graph</button>
+    </div>
+    <div class="btn-row">
+      <span class="lbl">Move an edge:</span>
+      <select class="field" data-person aria-label="Person"></select>
+      <select class="field" data-type aria-label="Edge type"><option value="LIVES_IN">LIVES_IN</option><option value="BORN_IN">BORN_IN</option></select>
+      <span class="lbl">→</span>
+      <select class="field" data-place aria-label="Place"></select>
+      <button class="btn" data-apply>Apply</button>
+    </div>
+    <div class="graph scroll-x"><svg viewBox="0 0 760 430" role="img" aria-label="A graph of five people, the cities, regions, countries, and continents they were born in and live in, linked by BORN_IN, LIVES_IN, and WITHIN edges."></svg></div>
+    <div class="legend">
+      <span><span class="ln dash"></span>BORN_IN</span>
+      <span><span class="ln"></span>LIVES_IN</span>
+      <span><span class="ln within"></span>WITHIN</span>
+      <span><span class="ln orange"></span>following BORN_IN</span>
+      <span><span class="ln blue"></span>following LIVES_IN</span>
+      <span><i style="background:var(--green-soft);border:1px solid var(--green)"></i>match</span>
+    </div>
+    <ol class="steps" data-log></ol>
+    <div class="table-wrap" data-results hidden></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Edges followed</div><div class="stat-value" data-out="edges">0</div></div>
+      <div class="stat"><div class="stat-label">People checked</div><div class="stat-value" data-out="people">0</div></div>
+      <div class="stat"><div class="stat-label">Matches</div><div class="stat-value" data-out="matches">0</div></div>
+    </div>
+    <div class="verdict" hidden></div>
+  </figure>
+
+  <p>The interesting part is <code>-[:WITHIN*0..]-&gt;</code>: follow <code>WITHIN</code> edges zero or more times. Tomás was born in Campinas, two hops below Brazil. Rafael's birthplace is only recorded as the state of Minas Gerais, one hop below Brazil. Inês was born in Porto, which sits directly in Portugal. One pattern matches all of them, because it does not fix the length of the path. Try pointing someone's <code>LIVES_IN</code> edge straight at a country, or at a continent, and see which paths still reach a <code>Country</code> vertex.</p>
+
+  <p>As with SQL, the query says nothing about how to find the matches. The animation starts at each person and walks forward, but an engine could just as well start from the continents and walk backward along incoming edges, or begin from whichever side has fewer vertices. Those choices belong to the query planner.</p>
+
+  <h2>The same question in SQL</h2>
+
+  <p>Since a property graph fits in two tables, you can ask the same question in SQL. The trouble is the variable-length path. In an ordinary join you must know in advance how many joins to write, and here the number of <code>WITHIN</code> hops differs from place to place. Recursive common table expressions, added in SQL:1999 and supported by PostgreSQL, MySQL 8, and SQLite, exist for exactly this:</p>
+
+<pre><code>WITH RECURSIVE in_country (place, country) AS (
+    SELECT id, id FROM vertices WHERE label = 'Country'
+  UNION
+    SELECT e.tail, ic.country
+    FROM edges e JOIN in_country ic ON e.head = ic.place
+    WHERE e.label = 'WITHIN'
+)
+SELECT person.properties->>'name' AS name
+FROM vertices person
+JOIN edges born    ON born.tail = person.id AND born.label = 'BORN_IN'
+JOIN in_country bc ON bc.place = born.head
+JOIN edges lives   ON lives.tail = person.id AND lives.label = 'LIVES_IN'
+JOIN in_country lc ON lc.place = lives.head
+JOIN edges c1      ON c1.tail = bc.country AND c1.label = 'WITHIN'
+JOIN edges c2      ON c2.tail = lc.country AND c2.label = 'WITHIN'
+WHERE c1.head &lt;&gt; c2.head;</code></pre>
+
+  <p>The recursive part builds a lookup from every place to the country that contains it, by starting at the countries and repeatedly following <code>WITHIN</code> edges backward. Then the person pattern turns into six joins. It works, and PostgreSQL will run it efficiently on a modest graph. But the Cypher version is five lines that look like the diagram, and this is sixteen lines that look like plumbing. The same data can be stored either way. What differs is which questions are pleasant to ask.</p>
+
+  <h2>Triple stores</h2>
+
+  <p>A triple store holds the same kind of data in an even simpler shape. Every fact is a three-part statement: <em>subject</em>, <em>predicate</em>, <em>object</em>. The subject is a vertex. The object is either another vertex, which makes the triple an edge, or a plain value, which makes it a property. Written in the Turtle format:</p>
+
+<pre><code>@prefix : &lt;urn:example:&gt; .
+:tomas     a :Person ;  :name "Tomás" ;            :bornIn :campinas ;  :livesIn :lisbon .
+:campinas  a :City ;    :name "Campinas" ;         :within :saoPaulo .
+:saoPaulo  a :Region ;  :name "São Paulo State" ;  :within :brazil .</code></pre>
+
+  <p>Triple stores are usually queried with SPARQL, the query language for RDF data, implemented by systems such as Apache Jena and Amazon Neptune. Its property paths express the same variable-length walk: <code>:bornIn/:within*</code> means one <code>bornIn</code> edge followed by any number of <code>within</code> edges.</p>
+
+<pre><code>SELECT ?name WHERE {
+  ?p :name ?name ;  :bornIn/:within* ?home ;  :livesIn/:within* ?now .
+  ?home a :Country ;  :within ?c1 .
+  ?now  a :Country ;  :within ?c2 .
+  FILTER (?c1 != ?c2)
+}</code></pre>
+
+  <p>Under the different syntax it is the same idea as Cypher: describe a pattern of vertices and edges, and let the database find every place it occurs.<span class="sidenote">An older relative is Datalog, which states facts and rules that may refer to themselves recursively. Datomic uses it as its query language.</span> Tables, documents, and graphs can all store the same facts. What differs is which questions each one makes easy, and the useful skill is choosing the shape that fits the questions your application will ask most.</p>
+
+  <p class="book-ref">In the book: Chapter 2, "Graph-Like Data Models", including "Property Graphs", "The Cypher Query Language", and "Graph Queries in SQL" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch2-graph.js"></script>
+</body>
+</html>

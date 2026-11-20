@@ -1,0 +1,113 @@
+/* =========================================================
+   Chapter 2 additions: data models and query languages.
+   Loaded after style.css. Colors come only from its tokens.
+   ========================================================= */
+
+/* ---------- Wide figures: borrow the right margin on big screens ---------- */
+@media (min-width: 1240px) {
+  .widget.wide { margin-right: -260px; }
+}
+.split-wrap { container-type: inline-size; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px 24px; }
+@container (min-width: 760px) {
+  .split.doc-rel { grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); }
+}
+@container (min-width: 620px) {
+  .split.even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+.pane-label { font: 500 12px/1.3 var(--sans); color: var(--ink-3); margin: 0 0 6px; display: flex; justify-content: space-between; gap: 8px; }
+.pane-label b { font-weight: 500; color: var(--ink); }
+
+/* ---------- JSON document with linkable fields ---------- */
+pre.json { margin: 0; font: 12.5px/1.65 var(--mono); padding: 14px 16px; border: 1px solid transparent; transition: background-color 250ms ease, border-color 250ms ease; }
+pre.json .jk { color: var(--ink-3); }
+pre.json.is-read { background: var(--green-soft); border-color: var(--green); }
+[data-f] { border-radius: 3px; cursor: pointer; transition: background-color 150ms ease, box-shadow 150ms ease; }
+[data-f].is-hl { background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); color: var(--ink); }
+[data-f]:focus-visible { outline-offset: 1px; }
+
+/* ---------- Small relational tables ---------- */
+.rel-table { margin: 0 0 14px; }
+.rel-table:last-child { margin-bottom: 0; }
+.rel-name { font: 500 12px/1.3 var(--mono); color: var(--ink-2); margin: 0 0 4px; }
+table.rel { border-collapse: collapse; font: 12px/1.4 var(--mono); color: var(--ink-2); white-space: nowrap; }
+table.rel th { font: 500 11px/1.3 var(--sans); color: var(--ink-3); text-align: left; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--line-2); }
+table.rel td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--line); transition: background-color 250ms ease, color 250ms ease; }
+table.rel td.key { color: var(--ink-3); }
+table.rel td:first-child, table.rel th:first-child { padding-left: 4px; }
+table.rel tr.is-read td { background: var(--green-soft); }
+table.rel tr.is-read td[data-f].is-hl { background: var(--accent-soft); }
+table.rel td.writing { background: var(--accent-soft); color: var(--ink); }
+table.rel td.written { color: var(--green); }
+table.rel td.stale { background: var(--orange-soft); color: var(--ink); }
+table.rel td.faint { color: var(--ink-4); }
+table.rel td.joined { color: var(--ink-3); }
+table.rel td.via { color: var(--accent); }
+
+/* ---------- Query log (what each model sent to the database) ---------- */
+.qlog { list-style: none; margin: 10px 0 0; padding: 0; font: 12px/1.5 var(--mono); color: var(--ink-3); min-height: 1.5em; }
+.qlog li { margin: 0 0 4px; padding-left: 12px; border-left: 2px solid var(--line-2); transition: opacity 250ms var(--ease-out); @starting-style { opacity: 0; } }
+.qlog li.done { border-left-color: var(--green); color: var(--ink-2); }
+.qlog li.fail { border-left-color: var(--red); color: var(--red); }
+.qlog .cnt { font-family: var(--sans); color: var(--ink-3); }
+
+/* ---------- Product cards for the query widget ---------- */
+.items { display: flex; flex-wrap: wrap; gap: 4px; }
+.item { display: inline-flex; align-items: baseline; gap: 5px; font: 12px/1 var(--sans); padding: 6px 7px; border: 1px solid var(--line-2); border-radius: 4px; background: var(--bg); color: var(--ink-2); white-space: nowrap; transition: background-color 150ms ease, border-color 150ms ease, opacity 150ms ease, color 150ms ease; }
+.item .p { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+.item .out { font-size: 10px; color: var(--ink-4); }
+.item.cur { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+.item.yes { border-color: var(--green); background: var(--green-soft); color: var(--ink); }
+.item.no { opacity: 0.38; }
+.qpanel { padding: 14px 0 0; border-top: 1px solid var(--line); margin-top: 14px; }
+.qhead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.qhead .t { font: 500 14px/1.4 var(--sans); color: var(--ink); }
+.qhead .c { font: 13px/1.4 var(--sans); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.qhead .c b { font-weight: 500; color: var(--ink); }
+.worker { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; align-items: start; margin-bottom: 6px; }
+.worker-label { font: 12px/26px var(--sans); color: var(--ink-3); }
+.plan { font: 12px/1.55 var(--mono); color: var(--ink-2); background: var(--code-bg); border-radius: 6px; padding: 8px 12px; margin: 0 0 10px; white-space: pre; overflow-x: auto; }
+.results { font: 12px/1.5 var(--sans); color: var(--ink-3); margin-top: 8px; min-height: 1.5em; }
+.results b { font-weight: 500; color: var(--ink-2); }
+.code-pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 16px; }
+@container (min-width: 620px) { .code-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.code-pair pre { margin: 0 0 14px; font-size: 12.5px; }
+
+/* ---------- Inline form controls ---------- */
+select.field { font: 13px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; height: 30px; padding: 0 8px; min-width: 0; max-width: 100%; }
+.btn-row .sep { width: 1px; height: 20px; background: var(--line-2); margin: 0 4px; }
+.btn-row label.inline { display: inline-flex; align-items: center; gap: 6px; font: 13px/1 var(--sans); color: var(--ink-2); cursor: pointer; }
+.btn-row .lbl { font: 13px/1 var(--sans); color: var(--ink-3); }
+
+/* ---------- Many-to-many diagram ---------- */
+.m2m [data-k] { cursor: pointer; }
+.m2m .dg-node.mono text { font: 12px var(--mono); }
+
+/* ---------- Graph diagram ---------- */
+.graph svg { display: block; width: 100%; min-width: 640px; }
+.gn rect { fill: var(--bg); stroke: var(--line-2); stroke-width: 1; transition: fill 200ms ease, stroke 200ms ease, opacity 200ms ease; }
+.gn text { fill: var(--ink); font: 500 12px var(--sans); transition: fill 200ms ease, opacity 200ms ease; }
+.gn.person rect { fill: var(--surface-2); }
+.gn.on rect { stroke: var(--ink); stroke-width: 1.5; }
+.gn.born rect { fill: var(--orange-soft); stroke: var(--orange); }
+.gn.lives rect { fill: var(--accent-soft); stroke: var(--accent); }
+.gn.born.lives rect { fill: var(--purple); fill-opacity: 0.14; stroke: var(--purple); }
+.gn.match rect { fill: var(--green-soft); stroke: var(--green); stroke-width: 1.5; }
+.gn.nomatch rect { opacity: 0.5; }
+.gn.nomatch text { opacity: 0.55; }
+.ge { fill: none; stroke: var(--ink-4); stroke-width: 1.2; transition: stroke 200ms ease, stroke-width 200ms ease, opacity 200ms ease; }
+.ge.k-born { stroke-dasharray: 4 3; }
+.ge.k-within { stroke: var(--line-2); }
+.ge.born-path { stroke: var(--orange); stroke-width: 2.2; }
+.ge.lives-path { stroke: var(--accent); stroke-width: 2.2; }
+.ge.fresh { stroke: var(--ink); stroke-width: 2; }
+.col-label { fill: var(--ink-3); font: 11px var(--sans); letter-spacing: 0.04em; text-transform: uppercase; }
+.legend .ln { display: inline-block; width: 22px; height: 0; border-top: 1.5px solid var(--ink-4); vertical-align: 3px; margin-right: 6px; }
+.legend .ln.dash { border-top-style: dashed; }
+.legend .ln.orange { border-top: 2.5px solid var(--orange); }
+.legend .ln.blue { border-top: 2.5px solid var(--accent); }
+.legend .ln.within { border-top-color: var(--line-2); }
+
+@media (prefers-reduced-motion: reduce) {
+  .qlog li { transition: none; }
+}

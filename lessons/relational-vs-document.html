@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relational and document models · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch2.css">
+</head>
+<body data-lesson="relational-vs-document">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Relational and document models</h1>
+  </header>
+
+  <p>Software is built in layers, and each layer describes data in the terms of the layer below it. Your application thinks in objects and structs. Those objects are stored as tables, documents, or graphs. The database turns those into bytes in memory and on disk, and the disk turns bytes into physical state. Every layer hides the one underneath, and every layer makes some operations easy and others clumsy.</p>
+
+  <p>This chapter is about the second layer: the shape your data takes inside the database. It is one of the hardest decisions to undo, because queries, indexes, and application code all grow around it. Two shapes dominate general-purpose storage today: relational tables, as in PostgreSQL and MySQL, and JSON-like documents, as in MongoDB and Couchbase.</p>
+
+  <h2>The object-relational mismatch</h2>
+
+  <p>The relational model stores data as relations, which SQL calls tables: unordered collections of rows, where every row has the same columns.<span class="sidenote">Edgar Codd proposed the relational model in 1970. By the mid-1980s relational databases had become the default way to store business data, and they still are.</span> In the classic model each cell holds a single value, and a row cannot contain a list of other rows.</p>
+
+  <p>Application code rarely looks like that. In most languages one object happily holds a list of other objects: a user has a list of jobs, each job has a title and an employer. Saving that object to tables means taking it apart into rows in several tables, and loading it means putting it back together. The friction between the two shapes is called the <strong>object-relational mismatch</strong>.<span class="sidenote">Also called the <em>impedance mismatch</em>, a term borrowed from electronics, where badly matched circuits lose signal at the connection.</span> Object-relational mappers such as Hibernate, ActiveRecord, and SQLAlchemy write most of that translation code for you, but they cannot make the two shapes the same.</p>
+
+  <p>Take a professional profile. Mira has one name and one location, but several jobs and several degrees. Each of those is a <strong>one-to-many</strong> relationship: one user, many positions. In a document database the whole profile is one JSON value with the positions nested inside it. In a relational database the usual design splits it across three tables, and every position row carries a <code>user_id</code> pointing back to its owner.</p>
+
+  <figure class="widget wide" id="profile">
+    <p class="widget-title">One profile, two models</p>
+    <p class="widget-sub">Hover or tap any value to find the same data in the other model. Click a value to pin it. Then load the whole profile and count what each model reads.</p>
+    <div class="btn-row">
+      <button class="btn primary" data-load>Load the whole profile</button>
+      <button class="btn" data-reset>Reset</button>
+    </div>
+    <div class="split-wrap">
+      <div class="split doc-rel">
+        <div>
+          <p class="pane-label"><b>Document</b><span>one collection: profiles</span></p>
+          <pre class="json" aria-label="The profile as a JSON document"></pre>
+          <ul class="qlog" data-log="doc"></ul>
+        </div>
+        <div>
+          <p class="pane-label"><b>Relational</b><span>three tables</span></p>
+          <div class="rel-tables"></div>
+          <ul class="qlog" data-log="rel"></ul>
+        </div>
+      </div>
+    </div>
+    <p class="note" data-readout>Hover or tap a value.</p>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Document: queries</div><div class="stat-value" data-out="dq">0</div></div>
+      <div class="stat"><div class="stat-label">Document: records read</div><div class="stat-value" data-out="dr">0</div></div>
+      <div class="stat"><div class="stat-label">Relational: queries</div><div class="stat-value" data-out="rq">0</div></div>
+      <div class="stat"><div class="stat-label">Relational: rows read</div><div class="stat-value" data-out="rr">0</div></div>
+    </div>
+    <div class="verdict" hidden></div>
+  </figure>
+
+  <p>Most values have exactly one home in each model. The user ID does not. In the document it appears once, at the top. In the tables it is copied into every child row, because that foreign key is the only thing that ties a position to its owner. The tables also need their own <code>id</code> for each position and degree. The document never needed those: a position is identified by where it sits inside the profile.</p>
+
+  <h2>Locality: one read or several</h2>
+
+  <p>When you load the profile, the document store looks up one key and reads one contiguous value. MongoDB stores each document as a single BSON blob, so the profile arrives in one piece. The relational design asks three tables. Each child table needs an index lookup on <code>user_id</code> to find its rows, and those rows may live on different pages on disk, far from the user row.</p>
+
+  <p>This advantage is called <strong>locality</strong>. If your application almost always needs the whole entity at once, for example to render a profile page, keeping it together means fewer lookups, fewer disk reads, and fewer round trips between application and database.<span class="sidenote">You can fetch all three tables in one query with joins, but joining two independent one-to-many lists multiplies them: three positions and two degrees come back as 3 × 2 = 6 rows, each repeating the user's columns. Many ORMs issue one query per table for this reason.</span></p>
+
+  <p>Locality has a price. The database usually reads the whole document even when you want one field, and on many storage engines changing one field rewrites the whole document. So document designs work best when documents stay reasonably small and do not grow without bound. Appending every login event to an array inside the user's profile is a classic mistake: every write gets slower as the array grows, and MongoDB will refuse a document over 16 MB.</p>
+
+  <p>Locality is not exclusive to documents, either. Google Spanner lets you declare a child table as interleaved in its parent, so a user's positions are stored physically next to the user row. Oracle offers table clusters for a similar purpose. And PostgreSQL will store a <code>jsonb</code> column right inside an ordinary row.</p>
+
+  <h2>When each model fits</h2>
+
+  <p>The document model fits data that forms a tree of one-to-many relationships and is usually read as a whole: a profile, an order with its line items, a page in a content system with its blocks. Documents in one collection do not have to share the same fields, which helps when records are naturally varied, or when their structure is decided by an outside system you do not control.</p>
+
+  <p>It gets awkward when something outside the document needs to point inside it. You cannot refer directly to Mira's second position; you can only say "element 1 of the <code>positions</code> array of user 4127", and array positions shift when a new job is added at the front. It also gets awkward when documents need to point at each other. If every position should link to a shared employer record, you are back to joins, and in many document databases joins are weak or missing. MongoDB has <code>$lookup</code>, but in practice the work often moves into application code, which runs several queries and stitches the results together.</p>
+
+  <p>The relational model fits data that is highly connected, that many different queries slice in many different ways, and where you want the database itself to enforce structure and relationships.</p>
+
+  <div class="table-wrap">
+    <table class="tradeoffs">
+      <tr><th></th><th>Document</th><th>Relational</th></tr>
+      <tr><td>Natural shape</td><td>Tree of nested one-to-many data</td><td>Flat rows linked by keys</td></tr>
+      <tr><td>Read one whole entity</td><td>One lookup, one contiguous read</td><td>One query per table, or a join</td></tr>
+      <tr><td>Read one field across many entities</td><td>Loads whole documents</td><td>Reads only the rows and columns needed</td></tr>
+      <tr><td>Refer to a nested item</td><td>By path inside the document</td><td>By its own primary key</td></tr>
+      <tr><td>Links between entities</td><td>Weak joins, or joins in application code</td><td>Joins are the core operation</td></tr>
+      <tr><td>Changing the structure</td><td>Write new fields; handle old ones in code</td><td>Migrate with <code>ALTER TABLE</code></td></tr>
+    </table>
+  </div>
+
+  <p>In practice the two camps have been borrowing from each other for years. PostgreSQL (since 9.4, with <code>jsonb</code>) and MySQL (since 5.7) can store, index, and query JSON documents. MongoDB added <code>$lookup</code> joins and, later, multi-document transactions. A common, sensible design today is a hybrid: relational tables for the entities that are shared and linked, and a JSON column for the nested parts that only ever belong to one row. The next lesson looks at exactly where that line falls.</p>
+
+  <p class="book-ref">In the book: Chapter 2, "Relational Model Versus Document Model" and "The Object-Relational Mismatch" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch2-profile.js"></script>
+</body>
+</html>
