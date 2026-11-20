@@ -1,0 +1,71 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Trailer encoder</title>
+<script type="module">
+  // Encodes a list of JPEG frame URLs (with optional cross-dissolves) into an H.264 MP4
+  // using WebCodecs and mp4-muxer.
+  import { Muxer, ArrayBufferTarget } from "/video/node_modules/mp4-muxer/build/mp4-muxer.mjs";
+
+  let result = null;
+
+  window.encodeVideo = async (entries, { fps, width, height, bitrate, codec }) => {
+    const muxer = new Muxer({ target: new ArrayBufferTarget(), video: { codec: "avc", width, height }, fastStart: "in-memory" });
+    let failure = null;
+    const encoder = new VideoEncoder({
+      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+      error: (e) => { failure = e; },
+    });
+    encoder.configure({ codec, width, height, bitrate, framerate: fps, latencyMode: "quality" });
+
+    // Small cache of decoded frames; dissolves need two at once.
+    const cache = new Map();
+    const load = async (url) => {
+      if (cache.has(url)) {
+        const hit = cache.get(url);            // move to the back: most recently used
+        cache.delete(url); cache.set(url, hit);
+        return hit;
+      }
+      if (cache.size >= 8) { const old = cache.keys().next().value; cache.get(old).close(); cache.delete(old); }
+      const bmp = await createImageBitmap(await (await fetch(url)).blob());
+      cache.set(url, bmp);
+      return bmp;
+    };
+    const canvas = new OffscreenCanvas(width, height);
+    // Opaque canvas: frames that carry an alpha channel come out of the encoder too dark.
+    const ctx = canvas.getContext("2d", { alpha: false });
+    // Source frames are 4K. When the output is 1080p this downscale is the supersampling step.
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+
+    for (let i = 0; i < entries.length; i++) {
+      if (failure) throw failure;
+      const e = entries[i];
+      // Every frame goes through the same canvas so plain frames and dissolves encode identically.
+      if (typeof e === "string") {
+        ctx.globalAlpha = 1; ctx.drawImage(await load(e), 0, 0, width, height);
+      } else {
+        // Cross-dissolve: draw the outgoing frame, then the incoming one on top at `mix` opacity.
+        const [a, b, mix] = e;
+        const from = await load(a), to = await load(b);
+        ctx.globalAlpha = 1; ctx.drawImage(from, 0, 0, width, height);
+        ctx.globalAlpha = mix; ctx.drawImage(to, 0, 0, width, height);
+      }
+      const frame = new VideoFrame(canvas, { timestamp: Math.round((i * 1e6) / fps), duration: Math.round(1e6 / fps) });
+      encoder.encode(frame, { keyFrame: i % fps === 0 });
+      frame.close();
+      while (encoder.encodeQueueSize > 6) await new Promise((r) => setTimeout(r, 4));
+    }
+    await encoder.flush();
+    if (failure) throw failure;
+    muxer.finalize();
+    result = new Uint8Array(muxer.target.buffer);
+    return result.length;
+  };
+
+  window.readChunk = (offset, n) => {
+    const part = result.subarray(offset, offset + n);
+    let s = "";
+    for (let i = 0; i < part.length; i += 0x8000) s += String.fromCharCode.apply(null, part.subarray(i, i + 0x8000));
+    return btoa(s);
+  };
+</script>
