@@ -40,14 +40,18 @@ function table() {
     row("Bytes written to disk", `${fmtBytes(L.physical)}<small>log ${fmtBytes(L.wal)} · flushes ${fmtBytes(L.flush)} · compaction ${fmtBytes(L.compaction)}</small>`,
       `${fmtBytes(B.physical)}<small>log ${fmtBytes(B.wal)} · pages ${fmtBytes(B.pages)}</small>`, pickBetter(L.physical, B.physical)),
     row("<strong>Write amplification</strong>", x2(waL), x2(waB), pickBetter(waL, waB)),
-    row("How it reaches the disk", `${fmt(L.files)} sequential file writes<small>average ${fmtBytes(L.avgFile)} each</small>`,
+    row("How it reaches the disk", L.files
+      ? `${fmt(L.files)} sequential file write${L.files === 1 ? "" : "s"}<small>average ${fmtBytes(L.avgFile)} each</small>`
+      : `only the log so far<small>the memtable has not been flushed yet</small>`,
       `${fmt(B.pageWrites)} random page writes<small>${fmtBytes(r.params.pageSize)} each</small>`, ""),
-    row("Largest single burst", `${fmtBytes(L.largestCompaction)}<small>one compaction, ${(100 * L.largestCompaction / L.physical).toFixed(0)}% of all disk writes</small>`,
+    row("Largest single burst", L.compactions
+      ? `${fmtBytes(L.largestCompaction)}<small>one compaction, ${(100 * L.largestCompaction / L.physical).toFixed(0)}% of all disk writes</small>`
+      : `none yet<small>no compaction has run</small>`,
       `${fmtBytes(B.largestFlush)}<small>${B.largestFlushPages === 1 ? "one page at a time" : `one write-back of ${fmt(B.largestFlushPages)} dirty pages`}</small>`, ""),
     row("Point read, key exists", `${n1(L.readHit)} block reads<small>${n1(L.tablesHit)} tables in key range</small>`, `${n1(B.readHit)} page reads<small>root to leaf</small>`, pickBetter(L.readHit, B.readHit)),
     row("Point read, key missing", `${n1(L.readMiss)} block reads<small>Bloom filters skipped ${fmt(L.bloomNo)} tables in ${L.lookups} reads</small>`, `${n1(B.readMiss)} page reads`, pickBetter(L.readMiss, B.readMiss)),
     row(`Range scan, ${L.scanLen} keys`, `${n1(L.scan)} block reads<small>every overlapping table</small>`, `${n1(B.scan)} page reads<small>descend once, walk leaves</small>`, pickBetter(L.scan, B.scan)),
-    row("Disk space used", `${fmtBytes(L.disk)}<small>${L.tables} SSTables, per level: ${L.levels.join(" / ")}</small>`, `${fmtBytes(B.disk)}<small>${fmt(B.pageCount)} pages, ${Math.round(B.fill * 100)}% full on average</small>`, pickBetter(L.disk, B.disk)),
+    row("Disk space used", `${fmtBytes(L.disk)}<small>${L.tables} SSTable${L.tables === 1 ? "" : "s"}, per level: ${L.levels.join(" / ")}</small>`, `${fmtBytes(B.disk)}<small>${fmt(B.pageCount)} pages, ${Math.round(B.fill * 100)}% full on average</small>`, pickBetter(L.disk, B.disk)),
     row("Live data", fmtBytes(r.live), fmtBytes(r.live), ""),
     row("<strong>Space amplification</strong>", x2(saL), x2(saB), pickBetter(saL, saB)),
   ].join("");

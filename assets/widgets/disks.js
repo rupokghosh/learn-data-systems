@@ -32,7 +32,7 @@ import { slider, fmt, rng, normal, prefersReducedMotion } from "../charts.js";
   function update() {
     stop();
     const perDay = disks / (mttf * 365);
-    out("day").textContent = fmt(perDay, perDay < 1 ? 2 : 1);
+    out("day").textContent = perDay < 0.1 ? String(+perDay.toPrecision(2)) : fmt(perDay, perDay < 1 ? 2 : 1);
     out("year").textContent = fmt(perDay * 365);
     out("every").textContent = every(perDay);
     out("sim").textContent = "–";
@@ -91,8 +91,15 @@ import { slider, fmt, rng, normal, prefersReducedMotion } from "../charts.js";
     const days = 1 / prob;
     if (days < 730) return `${fmt(days)} days`;
     const years = days / 365;
-    if (years > 1.4e10) return `${fmt(years)} years (longer than the age of the universe)`;
+    if (years > 1.4e10) return `${sci(years)} years (longer than the age of the universe)`;
     return `${fmt(years)} years`;
+  }
+
+  // 2.7e17 as "2.7 × 10¹⁷", so huge numbers stay short.
+  function sci(v) {
+    const e = Math.floor(Math.log10(v));
+    const sup = String(e).replace(/\d/g, (d) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[d]);
+    return `${+(v / 10 ** e).toFixed(1)} × 10${sup}`;
   }
 
   function update() {

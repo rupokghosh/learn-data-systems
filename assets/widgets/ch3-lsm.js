@@ -168,7 +168,8 @@ import { makePlayer, esc, pick } from "./ch3-util.js";
 
   function randomUntilFlush() {
     player.settle();
-    for (let i = 0; i < OPTS.memtableLimit; i++) {
+    // Overwrites of a key already in the memtable do not grow it, so keep writing until it flushes.
+    for (let i = 0; i < 200; i++) {
       const k = pick(rand, KEYS);
       const tomb = rand() < 0.1;
       const pre = liveState();
@@ -220,9 +221,10 @@ import { makePlayer, esc, pick } from "./ch3-util.js";
     mergeOut.hidden = true;
     let considered = 0, no = 0, reads = 0, fps = 0;
     const N = 20;
+    const written = db.snapshot();
     for (let i = 0; i < N; i++) {
       let k;
-      do { k = String.fromCharCode(97 + Math.floor(rand() * 26), 97 + Math.floor(rand() * 26), 97 + Math.floor(rand() * 26)); } while (KEYS.includes(k));
+      do { k = String.fromCharCode(97 + Math.floor(rand() * 26), 97 + Math.floor(rand() * 26), 97 + Math.floor(rand() * 26)); } while (KEYS.includes(k) || written.has(k));
       const r = db.get(k);
       considered += r.tablesConsidered; no += r.bloomNo; reads += r.pagesRead; fps += r.falsePositives;
     }

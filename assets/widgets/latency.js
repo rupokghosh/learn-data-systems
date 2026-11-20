@@ -34,7 +34,7 @@ import { el, logScale, linear, niceTicks, fmt, ms, responsive, slider, rng, norm
   function draw(w = width) {
     width = w;
     if (!w) return;
-    const h = 240, padB = 26, padT = 34;
+    const h = 248, padB = 26, padT = 48;
     const x = logScale([5, 10000], [0, w]);
     const BINS = Math.max(24, Math.min(56, Math.floor(w / 12)));
     const counts = new Array(BINS).fill(0);
@@ -57,14 +57,18 @@ import { el, logScale, linear, niceTicks, fmt, ms, responsive, slider, rng, norm
       const tx = el("text", { x: x(t), y: h - 8, "text-anchor": t === 10000 ? "end" : "middle" }, svg);
       tx.textContent = ms(t);
     }
-    // Marker lines with labels staggered on two rows to avoid collisions.
-    let lastX = -Infinity, row = 0;
+    // Marker lines with labels on up to three rows: each label takes the first row where it fits.
+    const rowEnds = [-Infinity, -Infinity, -Infinity];
     [...MARKERS].sort((a, b) => stats[a.key] - stats[b.key]).forEach((m) => {
       const px = x(stats[m.key]);
-      row = px - lastX < 46 ? (row + 1) % 2 : 0;
-      lastX = px;
-      el("line", { x1: px, x2: px, y1: padT - 4 - row * 0, y2: h - padB, style: `stroke:${m.color};stroke-width:2${m.dash ? `;stroke-dasharray:${m.dash}` : ""}` }, svg);
-      const t = el("text", { x: px, y: 12 + row * 14, "text-anchor": px > w - 30 ? "end" : "middle", style: `fill:${m.color};font-weight:600` }, svg);
+      const lw = m.label.length * 7 + 6;
+      const anchor = px > w - 30 ? "end" : "middle";
+      const left = anchor === "end" ? px - lw : px - lw / 2;
+      let row = rowEnds.findIndex((end) => end <= left);
+      if (row < 0) row = rowEnds.indexOf(Math.min(...rowEnds));
+      rowEnds[row] = left + lw;
+      el("line", { x1: px, x2: px, y1: padT - 4, y2: h - padB, style: `stroke:${m.color};stroke-width:2${m.dash ? `;stroke-dasharray:${m.dash}` : ""}` }, svg);
+      const t = el("text", { x: px, y: 12 + row * 14, "text-anchor": anchor, style: `fill:${m.color};font-weight:600` }, svg);
       t.textContent = m.label;
     });
   }
@@ -109,7 +113,7 @@ import { el, logScale, linear, niceTicks, fmt, ms, responsive, slider, rng, norm
       const tx = el("text", { x: padL - 6, y: y(t) + 4, "text-anchor": "end" }, svg); tx.textContent = `${t * 100}%`;
     }
     for (const t of niceTicks(0, 100, 5).filter((t) => t >= 1 || t === 0)) {
-      const tx = el("text", { x: x(Math.max(1, t)), y: h - 8, "text-anchor": "middle" }, svg); tx.textContent = Math.max(1, t);
+      const tx = el("text", { x: x(Math.max(1, t)), y: h - 8, "text-anchor": t === 100 ? "end" : "middle" }, svg); tx.textContent = Math.max(1, t);
     }
     let d = "";
     for (let k = 1; k <= 100; k++) d += `${k === 1 ? "M" : "L"}${x(k)},${y(prob(k))}`;

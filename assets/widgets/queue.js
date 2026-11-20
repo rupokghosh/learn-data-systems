@@ -25,13 +25,13 @@ function draw(w = width) {
   out("p99").textContent = over ? "∞" : ms(p99(u));
 
   let cls = "good", msg = "Comfortable. There is plenty of headroom for a traffic spike.";
-  if (over) { cls = "bad"; msg = "Overloaded. Requests arrive faster than they can be served, so the queue grows without limit. Add servers or shed load."; }
+  if (over) { cls = "bad"; msg = `Overloaded. Requests arrive ${u > 1 ? "faster than" : "exactly as fast as"} they can be served, so the queue grows without limit. Add servers or shed load.`; }
   else if (u > 0.85) { cls = "bad"; msg = "Danger zone. A small increase in traffic now causes a huge jump in response time."; }
   else if (u > 0.6) { cls = ""; msg = "Getting steep. Response time is starting to climb faster than load."; }
   verdict.className = `verdict ${cls}`;
   verdict.textContent = msg;
 
-  const h = 240, padL = 44, padB = 28, padT = 12;
+  const h = 240, padL = 50, padB = 28, padT = 12;
   const x = linear([0, 1], [padL, w - 10]);
   const y = linear([0, YMAX], [h - padB, padT]);
   chart.innerHTML = "";

@@ -59,8 +59,9 @@ function render(opts = {}) {
   if (opts.idxKey && !index.has(opts.idxKey) && opts.idxClass === "miss") rows.push(`<tr class="miss"><td>${esc(opts.idxKey)}</td><td>not in index</td></tr>`);
   idxOut.innerHTML = rows.length ? rows.join("") : `<tr class="none"><td colspan="2">no live keys</td></tr>`;
 
-  out("recs").textContent = String(db.diskRecords);
-  out("bytes").textContent = `${db.diskBytes} B`;
+  // Disk stats follow whatever is drawn, so a snapshot shows its own totals.
+  out("recs").textContent = String(segs.reduce((a, s) => a + s.records.length, 0));
+  out("bytes").textContent = `${segs.reduce((a, s) => a + s.bytes, 0)} B`;
   out("live").textContent = `${db.liveBytes} B`;
   out("read").textContent = lastRead === null ? "none yet" : `${lastRead} record${lastRead === 1 ? "" : "s"}`;
 }
@@ -148,6 +149,13 @@ function compact() {
   player.settle();
   const frozen = db.segments.filter((s) => s.frozen);
   if (!frozen.length) { say("No frozen segments yet. Compaction only touches segments that no longer take writes."); return; }
+  const frozenRecs = frozen.reduce((a, s) => a + s.records.length, 0);
+  const allLive = frozen.every((s) => s.records.every((_, pos) => db.isLive(s.id, pos)));
+  if (allLive && Math.ceil(frozenRecs / SEG) === frozen.length) {
+    render();
+    say("Nothing to compact: every record in the frozen segments is already the latest value of a live key, and they are as tightly packed as they can be. Write or delete some keys first.");
+    return;
+  }
   const snap = db.segments.map((s) => ({ ...s, records: [...s.records] }));
   const idxSnap = new Map(db.index);
   const marks = new Map();

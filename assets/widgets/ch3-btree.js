@@ -264,6 +264,13 @@ import { makePlayer, fmtBytes } from "./ch3-util.js";
   const KEY = [4, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256];
   const REF = 8;
   const s = { page: 8192, key: 16, depth: 4, fill: 0.7 };
+  // Very large values as "4.9 × 10¹⁸", so the extremes of the sliders stay readable.
+  const sci = (v) => {
+    const e = Math.floor(Math.log10(v));
+    return `${+(v / 10 ** e).toFixed(1)} × 10${String(e).replace(/\d/g, (d) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[d])}`;
+  };
+  const count = (n) => (n >= 1e12 ? sci(n) : fmt(n));
+  const size = (n) => (n >= 1024 ** 7 ? `${sci(n)} B` : fmtBytes(n));
 
   function update() {
     const raw = Math.floor(s.page / (s.key + REF));
@@ -276,11 +283,11 @@ import { makePlayer, fmtBytes } from "./ch3-util.js";
       const pages = b ** (i - 1);
       const bytes = pages * s.page;
       if (i < s.depth) interior += bytes;
-      rows.push(`<tr><td>${i === 1 ? "1 (root)" : i === s.depth ? `${i} (leaves)` : i}</td><td>${fmt(pages)}</td><td>${fmtBytes(bytes)}</td><td>${i < s.depth ? "interior: keys and page references" : "leaf: keys and values"}</td></tr>`);
+      rows.push(`<tr><td>${i === 1 ? "1 (root)" : i === s.depth ? `${i} (leaves)` : i}</td><td>${count(pages)}</td><td>${size(bytes)}</td><td>${i < s.depth ? "interior: keys and page references" : "leaf: keys and values"}</td></tr>`);
     }
     out("b").textContent = `${b}`;
-    out("leaves").textContent = fmt(leafPages);
-    out("data").textContent = fmtBytes(data);
+    out("leaves").textContent = count(leafPages);
+    out("data").textContent = size(data);
     out("reads").textContent = `${s.depth}`;
     out("rows").innerHTML = rows.join("");
     const v = root.querySelector(".verdict");
@@ -288,7 +295,7 @@ import { makePlayer, fmtBytes } from "./ch3-util.js";
     v.className = `verdict ${cacheable ? "good" : ""}`;
     v.innerHTML = s.depth === 1
       ? "A one-level tree is a single page. Add levels to see the fan-out."
-      : `A page of ${fmtBytes(s.page)} fits about ${raw} separator keys with their page references; at ${Math.round(s.fill * 100)}% full that is a branching factor of ${b}. Everything above the leaves adds up to <strong>${fmtBytes(interior)}</strong>${cacheable ? ", small enough to stay in memory, so a lookup typically costs a single disk read: the leaf." : ", which is more memory than most servers would spend on it, so some interior reads will go to disk."}`;
+      : `A page of ${fmtBytes(s.page)} fits about ${raw} separator keys with their page references; at ${Math.round(s.fill * 100)}% full that is a branching factor of ${b}. Everything above the leaves adds up to <strong>${size(interior)}</strong>${cacheable ? ", small enough to stay in memory, so a lookup typically costs a single disk read: the leaf." : ", which is more memory than most servers would spend on it, so some interior reads will go to disk."}`;
   }
 
   slider(root.querySelector("#cap-page"), (i) => fmtBytes(PAGE[i]), (i) => { s.page = PAGE[i]; update(); });

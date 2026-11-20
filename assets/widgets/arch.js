@@ -85,6 +85,9 @@ function scenario(kind) {
   // update
   const newName = dbName === "Ada" ? "Ada Lovelace" : "Ada";
   const skip = bugToggle.checked;
+  // Skipping the invalidation only leaves a stale copy if the cache holds a different name.
+  const wasWarm = cacheWarm;
+  const goesStale = skip && wasWarm && cachedName !== newName;
   dbName = newName;
   const steps = [
     step("user", "app", `You change your name to "${newName}".`),
@@ -100,9 +103,13 @@ function scenario(kind) {
     step("queue", "worker", "A background worker picks up the event."),
     step("worker", "search", "The worker updates the search index."),
   );
-  return { steps, done: skip
+  return { steps, done: goesStale
     ? { cls: "bad", text: "The cache was not invalidated. Read the profile again to see what users will see." }
-    : { cls: "good", text: "Database, cache, and search index all agree again. Notice the app replied before the index was updated." } };
+    : skip
+      ? { cls: "", text: wasWarm
+        ? `The cache was not invalidated, but by luck it already holds "${newName}", so nothing is stale this time. Update your name once more.`
+        : "The cache was not invalidated, but it was empty, so nothing is stale this time. Read the profile twice to warm the cache, then update your name again." }
+      : { cls: "good", text: "Database, cache, and search index all agree again. Notice the app replied before the index was updated." } };
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

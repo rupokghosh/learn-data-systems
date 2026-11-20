@@ -179,7 +179,7 @@ import { layout, pagesForQuery, bitmaps, runLengths, encodedSizes } from "../eng
     v.className = `verdict ${sorted ? "good" : ""}`;
     v.innerHTML = sorted
       ? `Sorted, each track's rows are contiguous, so each bitmap is a single block of 1s: just two runs, the 0s before the block and the block itself. The run-length encoding shrinks to <strong>${s.rle} bytes</strong>, ${Math.round((s.raw / s.rle) * 10) / 10} times smaller than the raw column.`
-      : `In arrival order, the 1s are scattered, so each bitmap breaks into many short runs. Run-length encoding still helps the rarer tracks most, whose bitmaps are mostly long runs of 0s.`;
+      : `In arrival order, the 1s are scattered, so each bitmap breaks into many short runs. With only ${N} rows, the run-length encoding (${s.rle} bytes) is ${s.rle > s.bitmap ? "even larger than" : "only a little smaller than"} the plain bitmaps (${s.bitmap} bytes). Runs only pay off when they are long: sort the rows and see.`;
   }
 
   sortBtn.addEventListener("click", () => {

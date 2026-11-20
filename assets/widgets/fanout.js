@@ -34,7 +34,9 @@ function draw(width = lastWidth) {
   const grid = el("g", { class: "grid" }, svg);
   for (const t of logTicks(1e3, 1e10)) {
     el("line", { x1: x(t), x2: x(t), y1: top, y2: h - 22 }, grid);
-    const tx = el("text", { x: x(t), y: h - 6, "text-anchor": "middle" }, svg); tx.textContent = fmt(t, 0);
+    // Keep the first and last tick labels inside the chart.
+    const anchor = t === 1e10 ? "end" : x(t) < 12 ? "start" : "middle";
+    const tx = el("text", { x: x(t), y: h - 6, "text-anchor": anchor }, svg); tx.textContent = fmt(t, 0);
   }
   rows.forEach((r, i) => {
     const y = top + i * rowH + (labelW ? 8 : 22);

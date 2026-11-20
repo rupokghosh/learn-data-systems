@@ -153,8 +153,8 @@ import { planRename } from "./ch2-logic.js";
     }
     const others = pairs.map(([p, o]) => (isPerson ? ORGS[o] : PEOPLE[p])).join(", ");
     outEl.innerHTML = isPerson
-      ? `${PEOPLE[id]} has ${pairs.length} rows in memberships: ${others}. <span class="mono">WHERE person_id = ${id}</span>`
-      : `${ORGS[id]} has ${pairs.length} members: ${others}. <span class="mono">WHERE org_id = ${id}</span>`;
+      ? `${PEOPLE[id]} has ${pairs.length} ${pairs.length === 1 ? "row" : "rows"} in memberships: ${others}. <span class="mono">WHERE person_id = ${id}</span>`
+      : `${ORGS[id]} has ${pairs.length} ${pairs.length === 1 ? "member" : "members"}: ${others}. <span class="mono">WHERE org_id = ${id}</span>`;
   }
   const keyOf = (e) => e.target.closest?.("[data-k]")?.dataset.k ?? null;
   const svg = root.querySelector("svg");
