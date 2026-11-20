@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learn Data Systems</title>
+<meta name="description" content="An interactive companion to Designing Data-Intensive Applications.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body data-page="home">
+<header class="topbar"></header>
+<main class="home">
+  <header class="home-hero">
+    <h1>Learn Data Systems</h1>
+  </header>
+
+  <p>This is an interactive companion to <em>Designing Data-Intensive Applications</em> by Martin Kleppmann. The book explains how databases, caches, queues, and distributed systems really work. This site lets you see those ideas move.</p>
+  <p>Each lesson is one page: a short explanation, followed by things you can change and watch. Grow a log until it needs compaction. Split a B-tree page. Let a celebrity post and see which timeline design falls over. The goal is not to memorize the book, but to build the intuition a good engineer uses when choosing and operating data systems.</p>
+  <p>Everything here is written fresh and only summarizes the book. Read the book for the full depth.</p>
+
+  <div id="chapters"></div>
+</main>
+<script type="module">
+  import { PARTS, isRead } from "/assets/site.js";
+  const chapterHtml = (c) => {
+    if (!c.lessons.length) {
+      return `<h3 class="index-chapter soon" id="chapter-${c.n}"><span>Chapter ${c.n} · ${c.title}</span><span class="read-count">Coming later</span></h3>`;
+    }
+    const read = c.lessons.filter((l) => isRead(l.slug)).length;
+    return `
+    <h3 class="index-chapter" id="chapter-${c.n}"><span>Chapter ${c.n} · ${c.title}</span>${read ? `<span class="read-count">${read} of ${c.lessons.length} read</span>` : ""}<small>${c.sub}</small></h3>
+    <ol class="index">${c.lessons.map((l, i) => `
+      <li class="${isRead(l.slug) ? "read" : ""}"><a href="/lessons/${l.slug}.html"><span class="num">${c.n}.${i + 1}</span><span><span class="t">${l.title}</span><span class="d">${isRead(l.slug) ? `<span class="read-mark">Read</span>` : ""}${l.desc}</span></span></a></li>`).join("")}
+    </ol>`;
+  };
+  const render = () => {
+    document.getElementById("chapters").innerHTML = PARTS.map((p) => `
+    <section class="index-part" id="part-${p.n}">
+      <h2 class="index-part-title"><span>Part ${p.n}</span>${p.title}</h2>
+      ${p.chapters.map(chapterHtml).join("")}
+    </section>`).join("");
+  };
+  render();
+  // Coming back with the browser's back button can restore a cached page; refresh the marks.
+  addEventListener("pageshow", render);
+</script>
+<script type="module" src="/assets/site.js"></script>
+</body>
+</html>

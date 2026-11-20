@@ -1,0 +1,10 @@
+.DS_Store
+node_modules/
+
+# Rendered frames and encoded videos
+video/frames/
+video/out/
+
+# Local editor and agent tooling
+.claude/skills/
+skills-lock.json
