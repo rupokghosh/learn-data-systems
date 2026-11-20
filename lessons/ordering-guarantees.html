@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ordering guarantees · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch9.css">
+</head>
+<body data-lesson="ordering-guarantees">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Ordering guarantees</h1>
+  </header>
+
+  <p>Order keeps coming back in this book. A single leader exists to put all writes in one sequence. Serializability promises that transactions behave as if they ran in some order. The clocks of Chapter 8 were an attempt to tell which of two events came first. This lesson pulls those threads together, and they lead somewhere surprising: ordering, linearizability, and consensus turn out to be three faces of one problem.</p>
+
+  <h2>Causality is a partial order</h2>
+  <p>Some events must come before others because one could have influenced the other. A comment on a pull request only makes sense after the pull request exists. A refund refers to a payment. If a replica applies the refund before it has the payment, it shows a state that never existed anywhere. A system that keeps every cause ahead of its effects is <strong>causally consistent</strong>. Snapshot isolation is an example: a consistent snapshot is one that, whenever it contains an effect, also contains its causes.</p>
+
+  <p>Causality does not order everything. Two events on different machines, where neither node could have known about the other's event, are <em>concurrent</em>, and neither comes first. So the causal order is a <strong>partial order</strong>: some pairs are ordered and some are not. Linearizability is stronger. Because the system behaves like one copy with atomic operations, every pair of operations is ordered, a <strong>total order</strong>. A linearizable system therefore preserves causality automatically, which is one reason it is easy to reason about, and one reason it is expensive.</p>
+
+  <p>You do not have to pay for linearizability to get causality. Causal consistency is, as far as anyone knows, the strongest consistency model that does not slow down with network delay and that keeps working during a network partition. Its cost is bookkeeping: to know whether one write depends on another, the database must track what each client had seen when it wrote, typically with something like the version vectors of Chapter 5, and doing that for every operation can get heavy.</p>
+
+  <h2>Lamport timestamps</h2>
+  <p>A cheaper tool gives a total order that agrees with causality without tracking every dependency. With one leader, this is easy: the leader numbers each write in its log. Without one, the obvious schemes fail. Separate counters per node (one hands out odd numbers, another even), wall-clock timestamps, or blocks of numbers handed to each node in advance all produce numbers that can contradict causality, because one node's numbers can run ahead of another's.</p>
+
+  <p><strong>Lamport timestamps</strong> fix this with two rules.<span class="sidenote">Leslie Lamport described them in 1978, in "Time, Clocks, and the Ordering of Events in a Distributed System", still one of the most cited papers in the field.</span> Every node keeps a counter. Each event on a node increments it, and the event's timestamp is the pair (counter, node ID). Every message carries the sender's counter, and a node that receives a message sets its counter to the larger of its own and the message's, then increments it for the receive event. To compare two timestamps, compare counters and break ties by node ID.</p>
+
+  <p>The maximum rule is what makes the order respect causality. If event <em>x</em> could have influenced event <em>y</em>, a chain of local steps and messages connects them, every hop pushes the counter strictly upward, and so <em>x</em> ends up with the smaller timestamp.</p>
+
+  <figure class="widget" id="spacetime">
+    <p class="widget-title">Lamport timestamps on a space-time diagram</p>
+    <p class="widget-sub">Each line is a node and time runs to the right. Add events and messages; the number in each circle is its Lamport timestamp.</p>
+    <div class="btn-row">
+      <span class="ch9-label">Clicking a line adds</span>
+      <button class="btn" data-mode="local" aria-pressed="true">A local event</button>
+      <button class="btn" data-mode="msg" aria-pressed="false">A message</button>
+      <span class="ch9-gap"></span>
+      <button class="btn" data-act="undo">Undo</button>
+      <button class="btn" data-act="example">Example</button>
+      <button class="btn" data-act="clear">Clear</button>
+    </div>
+    <div class="scroll-x"><svg class="ch9-svg" viewBox="0 0 640 236" aria-label="Three node timelines with events and messages"></svg></div>
+    <div class="legend"><span><i class="before"></i>happened before</span><span><i class="after"></i>happened after</span><span><i class="conc"></i>concurrent</span></div>
+    <p class="note" data-out="info"></p>
+    <p class="lane-label"><span>Lamport order: sorted by (timestamp, node)</span></p>
+    <div class="st-order"></div>
+    <div class="verdict"></div>
+    <figcaption>For a message, click the sending node's line, then the receiving node's line further right. The highlighting uses exact happens-before tracking so you can compare it with the timestamps.</figcaption>
+  </figure>
+
+  <p>Point at the events in the example. Blue is everything that could have influenced the one you chose, green is everything it could have influenced, and the dashed ones are concurrent with it. Some concurrent events carry smaller numbers. That is the limit of Lamport timestamps: if <em>x</em> happened before <em>y</em> then L(<em>x</em>) &lt; L(<em>y</em>), but the reverse does not hold, so a smaller timestamp does not prove that one event came first. Version vectors can detect concurrency; Lamport timestamps are more compact and give you a total order instead.</p>
+
+  <p>That total order still falls short for decisions made in real time. Suppose a theatre's ticket system runs on three nodes and must never sell seat 12A twice. Two requests for 12A arrive at almost the same moment on two different nodes. After the fact, Lamport timestamps settle it: the lower timestamp wins. The problem is the moment of decision. When node A gets its request, it must answer the buyer now. To know that its claim has the lowest timestamp, it would have to ask every other node whether it is handling a lower one, and if a node is unreachable, A cannot answer at all. The total order only exists once you have collected every operation. You also need to know <em>when the order is final</em>.</p>
+
+  <h2>Total order broadcast</h2>
+  <p>That missing piece has a name: <strong>total order broadcast</strong>, also called atomic broadcast. It is a protocol for sending messages to a group of nodes with two guarantees. <em>Reliable delivery</em>: if a message is delivered to one node, it is delivered to all of them, even if some are briefly down. <em>Totally ordered delivery</em>: every node delivers the messages in the same order. Crucially, the order is fixed at delivery time. A node never receives a message that slots in before one it has already delivered, which is exactly what timestamps could not promise.</p>
+
+  <p>This is what database replication needs. If every replica processes the same writes in the same order, every replica passes through the same states, an approach called state machine replication. ZooKeeper's Zab and etcd's Raft are total order broadcast at their core, and a single Kafka partition gives applications a similar ordered log.</p>
+
+  <figure class="widget" id="tob">
+    <p class="widget-title">Total order broadcast to three replicas</p>
+    <p class="widget-sub">Send claims for seats. Each copy of a message takes a different time to reach each replica.</p>
+    <div class="btn-row">
+      <button class="btn" data-act="ann">Ann claims 12A</button>
+      <button class="btn" data-act="ben">Ben claims 12A</button>
+      <button class="btn" data-act="both">Both at once</button>
+      <button class="btn" data-act="cy">Cy claims 14C</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn" data-act="order" aria-pressed="true">Hold back until in order</button>
+      <button class="btn" data-act="pause">Pause</button>
+      <button class="btn" data-act="step">Next arrival</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="scroll-x"><svg class="ch9-svg" viewBox="0 0 640 196" aria-label="A sequencer sending numbered messages to three replicas"></svg></div>
+    <div class="tob-cols"></div>
+    <div class="verdict"></div>
+    <figcaption>Here a single sequencer stamps the numbers. In a real system that sequencer is a leader, and keeping it unique and fault-tolerant is the consensus problem of the last lesson in this chapter.</figcaption>
+  </figure>
+
+  <p>Press "Both at once" a few times with the hold-back rule on: copies arrive in different orders, yet every replica gives 12A to the same person. Then switch the rule off and repeat. Each replica now applies claims in the order they happened to arrive, and sooner or later they disagree about who owns the seat.</p>
+
+  <h2>From broadcast to linearizable storage, and back</h2>
+  <p>Total order broadcast is enough to build a linearizable compare-and-set. To claim seat 12A, append a message "Ann claims 12A" to the log. Read the log, in delivery order, until your own message comes back. If the first claim on 12A in the log is yours, the seat is yours; if another came first, it is not. Every node reads the same log, so every node reaches the same verdict with no further coordination.</p>
+
+  <p>That makes writes linearizable. Reads from a node's local copy are not quite, because the copy may be behind the log. To fix reads, put them through the log too (append a marker and answer when it comes back), or ask for the latest log position and wait until the local copy reaches it, which is what ZooKeeper's <code>sync</code> does, or read from a replica that is updated synchronously.</p>
+
+  <p>The construction also runs the other way. Given a linearizable register with an atomic increment-and-get, stamp each message with the next number and have every node deliver in number order with no gaps: that is total order broadcast. The hard part is a gap left by a sender that crashed after taking a number, and resolving it in a fault-tolerant way is consensus. In fact all three, linearizable compare-and-set, total order broadcast, and consensus, are equivalent: a fault-tolerant solution to any one of them gives you the others. The next lessons look at what that costs.</p>
+
+  <p class="book-ref">In the book: Chapter 9, "Ordering Guarantees" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch9-order.js"></script>
+</body>
+</html>

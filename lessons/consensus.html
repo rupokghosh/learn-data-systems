@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fault-tolerant consensus · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch9.css">
+</head>
+<body data-lesson="consensus">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Fault-tolerant consensus</h1>
+  </header>
+
+  <p>Consensus means getting several nodes to agree on something. It sounds modest, yet it is one of the most important and most subtle problems in distributed systems. Electing one leader for a database, so that two nodes never both accept writes, is consensus. Deciding whether a distributed transaction commits, so that no node commits while another aborts, is consensus. Fixing the order of messages in total order broadcast is consensus, repeated for every message.</p>
+
+  <h2>The problem, stated precisely</h2>
+  <p>In the formal version, one or more nodes propose values and the algorithm decides on one of them. A correct algorithm satisfies four properties:</p>
+  <ul>
+    <li><strong>Uniform agreement:</strong> no two nodes decide differently.</li>
+    <li><strong>Integrity:</strong> no node decides twice.</li>
+    <li><strong>Validity:</strong> a decided value was proposed by some node.<span class="sidenote">Validity rules out trivial algorithms, such as one that always decides "null" whatever was proposed.</span></li>
+    <li><strong>Termination:</strong> every node that does not crash eventually decides.</li>
+  </ul>
+
+  <p>The first three are safety properties, and on their own they are easy: appoint one node as dictator and let it decide everything. Termination is what makes the problem hard, because the algorithm must keep deciding when nodes fail, the dictator included. Two-phase commit fails this test: if its coordinator dies, the participants wait indefinitely. A consensus algorithm tolerates the crash of any minority of its nodes. A cluster of five keeps deciding with two nodes down.</p>
+
+  <p>There is a famous negative result. In 1985, Fischer, Lynch, and Paterson proved that in a fully asynchronous system, with no clocks or timeouts and messages that may take any amount of time, no deterministic algorithm can guarantee consensus if even one node might crash. Practical algorithms get around it by using timeouts to suspect crashed nodes, or randomness. When a timeout fires wrongly, safety is never at risk; the algorithm may only stall until the network calms down. Every consensus system makes this deal: always correct, and live when the network is reasonable.</p>
+
+  <h2>Epochs, leaders, and overlapping quorums</h2>
+  <p>Raft, Multi-Paxos, Zab, and Viewstamped Replication do not decide one value at a time from scratch. They implement total order broadcast directly: a leader proposes the next entry in a log, and the group votes on it. That looks circular, since choosing a leader is itself consensus. The way out is an <strong>epoch number</strong>, called a term in Raft, a ballot number in Paxos, an epoch in Zab, and a view in Viewstamped Replication.</p>
+
+  <p>Within one epoch there is at most one leader. When nodes suspect that the leader has died, one of them starts an election for a higher epoch, and each node votes for at most one candidate per epoch. If two nodes both think they lead, in different epochs, the higher epoch wins.</p>
+
+  <p>A leader cannot simply trust that it still leads, since a newer epoch may have started behind its back. So every proposal is a second vote. The leader sends the entry to the others and waits for a quorum, usually a majority, to accept it, and a node accepts only if it has not seen a higher epoch. Any two majorities of the same cluster share at least one node, so the quorum that accepts a proposal overlaps the quorum that elected any newer leader. If a newer epoch exists, at least one voter knows about it, refuses, and tells the old leader that it has been replaced.</p>
+
+  <figure class="widget" id="raft">
+    <p class="widget-title">A five-node Raft cluster</p>
+    <p class="widget-sub">Watch the first election, send commands to the leader, then crash nodes or split the network. Clicking a node also crashes or restarts it.</p>
+    <div class="controls">
+      <div class="control"><label for="rf-speed">Speed <output></output></label><input id="rf-speed" type="range" min="0.25" max="2" step="0.25" value="1"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn" data-act="pause">Pause</button>
+      <button class="btn" data-act="step">Next event</button>
+      <button class="btn" data-act="reset">Reset</button>
+      <button class="btn" data-act="partition" aria-pressed="false">Isolate the leader with one follower</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn" data-crash="0">Crash N1</button>
+      <button class="btn" data-crash="1">Crash N2</button>
+      <button class="btn" data-crash="2">Crash N3</button>
+      <button class="btn" data-crash="3">Crash N4</button>
+      <button class="btn" data-crash="4">Crash N5</button>
+    </div>
+    <div class="btn-row" data-out="clients"></div>
+    <div class="scroll-x"><svg class="ch9-svg" viewBox="0 0 640 316" aria-label="Five nodes in a ring exchanging RequestVote and AppendEntries messages"></svg></div>
+    <div class="legend">
+      <span><i class="rv"></i>RequestVote</span><span><i class="vt"></i>vote granted</span><span><i class="ae"></i>AppendEntries (large dot: carries entries)</span><span><i class="rp"></i>reply</span>
+    </div>
+    <p class="lane-label"><span>Each node's log: term and command per index</span></p>
+    <div class="rf-log"></div>
+    <div class="legend"><span><i class="cm"></i>committed</span><span><i class="uc"></i>not committed yet</span><span>· is the no-op a new leader appends</span></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Leaders by term</div><div class="stat-value sm" data-out="leaders"></div></div>
+      <div class="stat"><div class="stat-label">Highest commit index</div><div class="stat-value" data-out="commit"></div></div>
+      <div class="stat"><div class="stat-label">Committed entries agree</div><div class="stat-value" data-out="safety"></div></div>
+    </div>
+    <ol class="steps"></ol>
+    <figcaption>A simplified Raft: terms, randomized election timeouts, one vote per term, the log up-to-date check on votes, the AppendEntries consistency check, and commit by majority are as in Raft. Snapshots, membership changes, pre-vote, and reads are left out, and the timings are slowed down so you can follow them.</figcaption>
+  </figure>
+
+  <p>The grey ring around each follower is its election timeout running down, randomized so that nodes rarely expire together. When one runs out, that node becomes a candidate (orange), increments its term, and sends RequestVote to everyone. A node grants its vote only if it has not voted in that term and the candidate's log is at least as up to date as its own. The first candidate to collect three votes leads the term and sends AppendEntries, both as a heartbeat and to replicate commands. Send a few commands and watch the log table: an entry turns green once the leader knows a majority stores it.<span class="sidenote">In Raft the commit index lives in memory, so a node you restart shows nothing committed until the leader's next heartbeat tells it.</span></p>
+
+  <p>Now isolate the leader with one follower. The old leader still accepts commands, but it reaches only two of five nodes, so those entries never commit. On the other side, three nodes time out, elect a new leader in a higher term, and commit normally. Heal the partition: the old leader sees the higher term, steps down, and its uncommitted entries are overwritten by the new leader's log. Two nodes may each believe they lead for a while, but never in the same term, and the stats line checks that every committed entry is identical on every node.</p>
+
+  <h2>What consensus costs</h2>
+  <ul>
+    <li><strong>Every write is a vote.</strong> A proposal is acknowledged only after a majority has stored it, which is synchronous replication. Many databases use asynchronous replication precisely to avoid that latency, and accept that a failover can lose recent writes.</li>
+    <li><strong>A strict majority must be reachable.</strong> Three nodes tolerate one failure, five tolerate two. During a partition the minority side cannot make progress, as the simulation shows.</li>
+    <li><strong>Membership is usually fixed.</strong> Raft has an extension for adding and removing nodes, but it is markedly harder to get right than the core algorithm.</li>
+    <li><strong>Failure detection relies on timeouts.</strong> Where network delays vary widely, false suspicions trigger elections, and while an election runs nothing commits. A node with a flaky link can keep starting elections and disrupt a healthy leader, which is why many implementations add a pre-vote round. Keep the election timeout well above normal round trips; etcd's defaults are a 100 ms heartbeat and a 1 s election timeout.</li>
+  </ul>
+
+  <h2>Coordination services</h2>
+  <p>Few applications implement consensus themselves. They use a coordination service such as ZooKeeper or etcd. These hold a small amount of data, small enough to fit in memory, replicated across three or five nodes by a consensus algorithm, and offer a handful of features that are easy to build on:</p>
+  <ul>
+    <li><strong>Linearizable atomic operations.</strong> A compare-and-set is enough for a lock or a lease: when several nodes try to create the same key, exactly one succeeds.</li>
+    <li><strong>Total ordering of operations.</strong> Every change gets a number that only grows, the zxid in ZooKeeper and the revision in etcd. That number makes a good fencing token (Chapter 8): storage can reject a write from a lock holder whose token is older than one it has already seen.</li>
+    <li><strong>Failure detection.</strong> Clients hold a session (ZooKeeper) or a lease (etcd), kept alive by heartbeats. When the heartbeats stop, the service expires it and deletes the keys tied to it, which releases any locks that client held.</li>
+    <li><strong>Change notifications.</strong> Clients can watch keys and are told when they change, so a node learns that a lock was released or a peer joined without polling.</li>
+  </ul>
+
+  <p>The typical uses follow from those features. <strong>Allocating work</strong>: when exactly one node should run a job, or partitions must be assigned to nodes and reassigned when one dies, the coordination service holds the decision. Kafka used ZooKeeper for this for years before moving to its own Raft-based controller quorum, and Kubernetes keeps all of its cluster state in etcd. <strong>Service discovery</strong>: finding the current address of the payment service. This rarely needs consensus, since a slightly stale answer is usually fine, but it is convenient to keep next to everything else. <strong>Membership</strong>: agreeing which nodes are currently considered alive, a consensus decision about a fact that is inherently uncertain.</p>
+
+  <p>A practical rule: keep slow-changing coordination state in the service, such as who leads, who owns which partition, and configuration, and keep the application's data elsewhere. A coordination service is built for small, rarely changing data, not for your order table. That split lets an application run on thousands of nodes while only three or five of them take part in consensus.</p>
+
+  <p class="book-ref">In the book: Chapter 9, "Fault-Tolerant Consensus" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch9-raft.js"></script>
+</body>
+</html>

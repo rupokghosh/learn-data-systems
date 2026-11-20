@@ -1,0 +1,142 @@
+/* =========================================================
+   Chapter 9: consistency and consensus visuals.
+   Loaded after style.css. Colors only via its variables.
+   ========================================================= */
+
+.ch9-label { font: 12px/1.3 var(--sans); color: var(--ink-3); margin-right: 2px; }
+.ch9-gap { width: 10px; }
+.ch9-svg { display: block; width: 100%; height: auto; user-select: none; -webkit-user-select: none; }
+.ch9-svg text { font-family: var(--sans); }
+.ch9-svg .lbl { fill: var(--ink); font: 500 13px var(--sans); }
+.ch9-svg .sub { fill: var(--ink-3); font: 11px var(--sans); }
+.ch9-svg .tiny { fill: var(--ink-3); font: 10px var(--sans); }
+.ch9-svg .mono { font: 10.5px var(--mono); fill: var(--ink-2); }
+.ch9-svg .axis { stroke: var(--line-2); stroke-width: 1; }
+.ch9-svg .lane-line { stroke: var(--line-2); stroke-width: 1; }
+.ch9-svg .lane-hit { fill: transparent; cursor: copy; touch-action: pan-x pan-y; }
+
+/* ---------- Linearizability timeline ---------- */
+.op { cursor: grab; touch-action: none; }
+.op rect.bar { stroke-width: 1.2; transition: stroke 150ms ease, fill 150ms ease; }
+.op.w rect.bar { fill: var(--accent-soft); stroke: var(--accent); }
+.op.r rect.bar { fill: var(--surface-2); stroke: var(--ink-3); }
+.op.sel rect.bar { stroke-width: 2.4; }
+.op.blocked rect.bar { fill: var(--red-soft); stroke: var(--red); }
+.op text { fill: var(--ink); font: 500 12px var(--sans); pointer-events: none; }
+.op .grip { fill: var(--ink-3); opacity: .5; pointer-events: none; }
+.op:focus-visible { outline: none; }
+.op:focus-visible rect.bar { stroke-width: 2.4; stroke-dasharray: 3 2; }
+.lin-point { fill: var(--ink); }
+.lin-path { stroke: var(--ink); stroke-width: 1.2; fill: none; stroke-dasharray: 4 3; opacity: .65; }
+.lin-num { fill: var(--ink); font: 600 10px var(--sans); }
+.lin-editor { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; font: 13px/1.4 var(--sans); color: var(--ink-3); }
+.lin-editor[hidden] { display: none; }
+.lin-editor .val { min-width: 22px; text-align: center; font: 500 15px var(--mono); color: var(--ink); }
+.lin-order { font: 12.5px/1.7 var(--mono); color: var(--ink-2); margin: 10px 0 0; }
+.lin-order:empty { display: none; }
+
+/* ---------- CAP demo ---------- */
+.cap-dc rect.box { fill: var(--surface-2); stroke: var(--line-2); transition: fill 200ms ease, stroke 200ms ease; }
+.cap-dc.err rect.box { fill: var(--red-soft); stroke: var(--red); }
+.cap-dc.ok rect.box { fill: var(--green-soft); stroke: var(--green); }
+.cap-dc.stale rect.box { fill: var(--orange-soft); stroke: var(--orange); }
+.cap-dc .big { fill: var(--ink); font: 500 26px var(--mono); }
+.cap-link { stroke: var(--ink-3); stroke-width: 2; transition: stroke 200ms ease; }
+.cap-link.cut { stroke: var(--red); stroke-dasharray: 6 5; }
+.cap-cut { stroke: var(--red); stroke-width: 3; stroke-linecap: round; transition: opacity 200ms ease; }
+.cap-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px; margin-top: 12px; }
+.cap-actions .btn-row { margin: 4px 0 0; }
+@media (max-width: 520px) { .cap-actions { grid-template-columns: 1fr; } }
+
+/* ---------- Space-time diagram ---------- */
+.st-ev circle { stroke-width: 1.5; fill: var(--bg); stroke: var(--ink-3); transition: fill 150ms ease, stroke 150ms ease, opacity 150ms ease; cursor: pointer; }
+.st-ev text { font: 600 10px var(--sans); fill: var(--ink); pointer-events: none; }
+.st-ev.before circle { fill: var(--accent); stroke: var(--accent); }
+.st-ev.before text, .st-ev.after text, .st-ev.self text { fill: var(--bg); }
+.st-ev.after circle { fill: var(--green); stroke: var(--green); }
+.st-ev.self circle { fill: var(--ink); stroke: var(--ink); }
+.st-ev.conc circle { fill: var(--orange-soft); stroke: var(--orange); stroke-dasharray: 3 2; }
+.st-msg { stroke: var(--ink-3); stroke-width: 1.4; fill: none; transition: stroke 150ms ease, opacity 150ms ease; }
+.st-msg.hot { stroke: var(--accent); stroke-width: 2; }
+.st-dim .st-msg:not(.hot) { opacity: .35; }
+.st-pending { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 2; }
+.st-order { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 10px; }
+.st-order .rec { cursor: pointer; }
+.st-order .rec.before { background: var(--accent-soft); border-color: var(--accent); }
+.st-order .rec.after { background: var(--green-soft); border-color: var(--green); }
+.st-order .rec.conc { background: var(--orange-soft); border-color: var(--orange); }
+.st-order .rec.self { background: var(--ink); border-color: var(--ink); }
+.st-order .rec.self .k, .st-order .rec.self .v { color: var(--bg); }
+.st-order .lt { font: 11px var(--sans); color: var(--ink-4); }
+.legend i.before { background: var(--accent); }
+.legend i.after { background: var(--green); }
+.legend i.conc { background: var(--orange-soft); border: 1px dashed var(--orange); }
+
+/* ---------- Total order broadcast ---------- */
+.tob-pill rect { fill: var(--accent-soft); stroke: var(--accent); }
+.tob-pill text { fill: var(--ink); font: 500 10.5px var(--mono); }
+.tob-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 16px; margin-top: 6px; }
+@media (max-width: 600px) { .tob-cols { grid-template-columns: minmax(0, 1fr); } }
+.tob-cols .lane { min-height: 34px; }
+.tob-col h4 { margin: 0; font: 500 13px/1.4 var(--sans); color: var(--ink); }
+.tob-seat { font: 12px/1.5 var(--sans); color: var(--ink-3); margin-top: 6px; }
+.tob-seat b { color: var(--ink); font-weight: 500; }
+.rec.enter { transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out), background-color 200ms ease, border-color 200ms ease;
+  @starting-style { opacity: 0; transform: translateY(4px); } }
+.rec.rej .v { color: var(--red); }
+
+/* ---------- Two-phase commit ---------- */
+.tp-node rect.box { fill: var(--bg); stroke: var(--line-2); stroke-width: 1.2; transition: fill 200ms ease, stroke 200ms ease, opacity 200ms ease; }
+.tp-node.prepared rect.box { fill: var(--orange-soft); stroke: var(--orange); }
+.tp-node.committed rect.box { fill: var(--green-soft); stroke: var(--green); }
+.tp-node.aborted rect.box { fill: var(--surface-2); stroke: var(--ink-3); }
+.tp-node.decided-commit rect.box { fill: var(--green-soft); stroke: var(--green); }
+.tp-node.decided-abort rect.box { fill: var(--surface-2); stroke: var(--ink-3); }
+.tp-node.down rect.box { stroke-dasharray: 5 4; stroke: var(--red); fill: var(--red-soft); }
+.tp-node .state { font: 600 12px var(--sans); fill: var(--ink); }
+.tp-node.prepared .state { fill: var(--orange); }
+.tp-node.committed .state, .tp-node.decided-commit .state { fill: var(--green); }
+.tp-node.down .state { fill: var(--red); }
+.tp-lock { font: 11px var(--sans); }
+.tp-lock.held { fill: var(--orange); }
+.tp-lock.free { fill: var(--ink-4); }
+.tp-msg rect { fill: var(--bg); stroke: var(--ink-3); }
+.tp-msg text { font: 600 10px var(--sans); fill: var(--ink); }
+.tp-msg.lost rect { stroke: var(--red); }
+.tp-msg.lost text { fill: var(--red); }
+
+/* ---------- Raft ---------- */
+.rf-node circle.body { fill: var(--bg); stroke: var(--line-2); stroke-width: 1.5; transition: fill 200ms ease, stroke 200ms ease, opacity 200ms ease; cursor: pointer; }
+.rf-node.leader circle.body { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 3; }
+.rf-node.candidate circle.body { fill: var(--orange-soft); stroke: var(--orange); stroke-width: 2; }
+.rf-node.down circle.body { fill: var(--surface-2); stroke: var(--red); stroke-dasharray: 4 3; }
+.rf-node.down text { opacity: .5; }
+.rf-node .nm { font: 600 14px var(--sans); fill: var(--ink); pointer-events: none; }
+.rf-node .tm { font: 10.5px var(--sans); fill: var(--ink-3); pointer-events: none; }
+.rf-node .role { font: 500 11px var(--sans); fill: var(--ink-3); pointer-events: none; }
+.rf-node.leader .role { fill: var(--accent); }
+.rf-node.candidate .role { fill: var(--orange); }
+.rf-node.down .role { fill: var(--red); opacity: 1; }
+.rf-timer { fill: none; stroke: var(--ink-4); stroke-width: 2.5; stroke-linecap: round; }
+.rf-wall { stroke: var(--red); stroke-width: 2; stroke-dasharray: 7 5; }
+.rf-log { overflow-x: auto; margin-top: 8px; }
+.rf-log table { border-collapse: separate; border-spacing: 3px; font: 11px/1.2 var(--sans); }
+.rf-log th { font-weight: 500; color: var(--ink-3); text-align: left; padding: 0 6px 0 0; white-space: nowrap; }
+.rf-log th.idx { text-align: center; font-weight: 400; color: var(--ink-4); padding: 0; }
+.rf-log td.e { width: 40px; min-width: 40px; height: 34px; border: 1px dashed var(--line-2); border-radius: 4px; text-align: center; vertical-align: middle; color: var(--ink-2); background: var(--bg); transition: background-color 200ms ease, border-color 200ms ease; }
+.rf-log td.e b { display: block; font: 500 10px var(--sans); color: var(--ink-3); }
+.rf-log td.e span { font: 10.5px var(--mono); }
+.rf-log td.e.c { border-style: solid; border-color: var(--green); background: var(--green-soft); }
+.rf-log td.e.none { border-color: transparent; background: none; }
+.rf-log tr.down td, .rf-log tr.down th { opacity: .45; }
+.rf-log tr.lead th { color: var(--accent); }
+.legend i.ae { background: var(--accent); border-radius: 50%; }
+.legend i.rv { background: var(--orange); border-radius: 50%; }
+.legend i.vt { background: var(--green); border-radius: 50%; }
+.legend i.rp { background: var(--ink-3); border-radius: 50%; }
+.legend i.cm { background: var(--green-soft); border: 1px solid var(--green); }
+.legend i.uc { background: var(--bg); border: 1px dashed var(--ink-3); }
+
+@media (prefers-reduced-motion: reduce) {
+  .rec.enter { transition: none; }
+}

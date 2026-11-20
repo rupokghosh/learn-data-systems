@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linearizability · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch9.css">
+</head>
+<body data-lesson="linearizability">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Linearizability</h1>
+  </header>
+
+  <p>An on-call engineer flips a feature flag to switch off a broken checkout path. The admin console confirms it, and she tells the incident channel the path is off. For the next forty seconds, some application servers keep reading the flag from a replica that has not caught up, and customers keep landing on the broken path. The system told one person that the world had changed while telling others that it had not.</p>
+
+  <p><strong>Linearizability</strong> is the guarantee that rules this out. It asks a replicated system to behave as if there were only one copy of the data, and as if every operation on that copy took effect in a single instant. It also goes by atomic consistency, strong consistency, and external consistency.</p>
+
+  <h2>One copy, atomic operations</h2>
+  <p>Take a single <em>register</em>: one value that clients can read and write, such as a key in a key-value store or a row in a table.<span class="sidenote">Linearizability is defined one object at a time. Grouping several objects into one unit is the job of transactions, a separate guarantee.</span> Every operation takes time. A client sends a request, waits, and gets a response, and from the outside all you can observe is the interval between the two. Linearizability requires that each operation appear to take effect at one instant somewhere inside its own interval, and that the sequence of those instants be a valid history of a single register: every read returns the value of the most recent write before it.</p>
+
+  <p>Two rules follow. If a write finished before a read started, the read must see that write or a later one. And once any read has returned a new value, no later read may return the old one, on any client, even while the write is still in progress. A write that has not finished may or may not be visible yet; but the moment one reader sees it, everyone must.</p>
+
+  <p>You can test a recorded history against this definition mechanically. Look for an order of all the operations that respects real time (if one ended before another began, it comes first) and in which every read returns the latest write. If such an order exists, the history is linearizable. The checker below runs exactly that search on whatever you draw.</p>
+
+  <figure class="widget" id="lin-check">
+    <p class="widget-title">Linearizability checker</p>
+    <p class="widget-sub">Click a client's line to add an operation. Drag a bar to move it, drag its ends to resize it, and click it to change its value or delete it.</p>
+    <div class="btn-row">
+      <span class="ch9-label">New operations are</span>
+      <button class="btn" data-mode="w" aria-pressed="true">Writes</button>
+      <button class="btn" data-mode="r" aria-pressed="false">Reads</button>
+    </div>
+    <div class="btn-row">
+      <span class="ch9-label">Histories</span>
+      <button class="btn" data-preset="ok">Linearizable</button>
+      <button class="btn" data-preset="stale">Stale read</button>
+      <button class="btn" data-preset="flip">Flip back</button>
+      <button class="btn" data-preset="none">Clear</button>
+    </div>
+    <div class="scroll-x"><svg class="ch9-svg" viewBox="0 0 640 250" aria-label="Timeline of reads and writes by three clients on one register"></svg></div>
+    <div class="lin-editor" hidden>
+      <span data-out="who"></span>
+      <button class="btn" data-type="w">Write</button>
+      <button class="btn" data-type="r">Read</button>
+      <span data-out="vlabel">stores</span>
+      <button class="btn" data-act="dec" aria-label="Lower the value">−</button>
+      <span class="val">1</span>
+      <button class="btn" data-act="inc" aria-label="Raise the value">+</button>
+      <button class="btn" data-act="del">Delete</button>
+    </div>
+    <div class="verdict"></div>
+    <p class="lin-order"></p>
+    <figcaption>The search tries every order consistent with real time and remembers dead ends, so it stays fast for a dozen operations. Keyboard: focus a bar, then use the arrow keys to move it and Delete to remove it.</figcaption>
+  </figure>
+
+  <p>Try the stored histories. In the stale read, client C starts reading after the write of 1 has returned, yet gets 0; no instant inside C's bar can come before the write. The flip back is subtler. The write of 1 is still running during both reads, so either answer alone would be fine. But B has already seen 1, and C's read began after B's ended, so C cannot go back to 0. Drag C's read left until it overlaps B's and the history becomes legal: two reads that run at the same time may disagree.</p>
+
+  <p>Jepsen tests real databases the same way: it records histories while injecting faults and feeds them to a checker such as Knossos. The search is NP-complete in general, which is why this one stops at twelve operations.</p>
+
+  <h2>Not the same as serializability</h2>
+  <p>The two words sound alike and are easy to mix up, but they answer different questions. <strong>Serializability</strong> is an isolation property of transactions: each transaction may touch many objects, and the database promises that the result equals <em>some</em> serial order of the transactions. That order does not have to match real time. <strong>Linearizability</strong> is a recency guarantee for individual reads and writes of one object, and it says nothing about grouping operations.</p>
+
+  <p>A database can provide both, which is called strict serializability; serial execution and two-phase locking usually do. Serializable snapshot isolation, as in PostgreSQL, does not: a transaction reads from a snapshot taken when it started, so it ignores writes that committed later, even ones that finished before the read in real time.</p>
+
+  <h2>When you need it</h2>
+  <p><strong>Locks and leader election.</strong> Several instances of a scheduler must agree on which one runs the nightly billing job, so each tries to take a lock by creating a key in etcd or ZooKeeper. A lock that two instances can both believe they hold is worse than none, so taking it must be a linearizable compare-and-set.</p>
+
+  <p><strong>Uniqueness and other hard constraints.</strong> Two sign-ups choosing the same email address, two buyers taking the last unit of stock, a balance that must never go negative: enforcing these at write time needs one up-to-date value that everyone agrees on. Constraints you can check later and repair by apologizing do not.</p>
+
+  <p><strong>Information that travels by a second path.</strong> An order service writes order 4471 to the database, then puts "render the invoice for 4471" on a message queue. If the invoice worker reads from a follower that is behind, it finds no such order: the queue beat replication. Either read from a linearizable source, or carry enough in the message (the data, or a version to wait for) that the race cannot hurt.</p>
+
+  <h2>Replication and linearizability</h2>
+  <p><strong>Single-leader replication</strong> can be linearizable if reads go to the leader or to synchronously updated followers, and if the leader really is the leader. Asynchronous failover can promote a follower that lacks acknowledged writes, and a deposed leader that has not noticed may keep answering.</p>
+
+  <p><strong>Consensus algorithms</strong> such as Raft and Zab are built to prevent split brain and stale replicas, which is how etcd and ZooKeeper offer linearizable operations. Details still matter: ZooKeeper reads may lag unless the client calls <code>sync</code> first, while etcd reads are linearizable by default.</p>
+
+  <p><strong>Multi-leader replication</strong> is not linearizable: several nodes accept writes at once and replicate them later.</p>
+
+  <p><strong>Leaderless replication</strong> is probably not. Last write wins with wall clocks cannot be, because of clock skew, and sloppy quorums give it up entirely. Even strict quorums (<em>w</em> + <em>r</em> &gt; <em>n</em>) can produce the flip-back history: while a write is spreading, one reader's quorum includes a replica with the new value and a later reader's does not. Synchronous read repair fixes reads and writes at a cost in latency, but not compare-and-set, which needs consensus.</p>
+
+  <h2>The cost: CAP and latency</h2>
+  <p>Suppose a database runs in two data centres and the link between them fails while both keep serving local clients. To stay linearizable, the side that cannot reach the leader must refuse requests. If both sides keep answering from their own copy, the copies drift apart and the system is no longer linearizable. There is no third option.</p>
+
+  <figure class="widget" id="cap">
+    <p class="widget-title">A partition between two data centres</p>
+    <p class="widget-sub">Pick a policy, cut the link, then write and read from both cities.</p>
+    <div class="btn-row">
+      <button class="btn" data-policy="lin" aria-pressed="true">Stay linearizable</button>
+      <button class="btn" data-policy="avail" aria-pressed="false">Stay available</button>
+      <span class="ch9-gap"></span>
+      <button class="btn" data-act="cut" aria-pressed="false">Cut the link</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="scroll-x"><svg class="ch9-svg" viewBox="0 0 640 166" aria-label="Two data centres, Tokyo and Lisbon, each holding a copy of a price, joined by a replication link"></svg></div>
+    <div class="cap-actions">
+      <div><p class="lane-label"><span>A client in Tokyo</span></p><div class="btn-row"><button class="btn" data-write="0">Write a new price</button><button class="btn" data-read="0">Read the price</button></div></div>
+      <div><p class="lane-label"><span>A client in Lisbon</span></p><div class="btn-row"><button class="btn" data-write="1">Write a new price</button><button class="btn" data-read="1">Read the price</button></div></div>
+    </div>
+    <ol class="steps"></ol>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Requests answered</div><div class="stat-value" data-out="served">0</div></div>
+      <div class="stat"><div class="stat-label">Errors</div><div class="stat-value" data-out="errors">0</div></div>
+      <div class="stat"><div class="stat-label">Stale reads</div><div class="stat-value" data-out="stale">0</div></div>
+    </div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>That trade-off is the content of the <strong>CAP theorem</strong>. It is often quoted as "consistency, availability, partition tolerance: pick two", which misleads. A network partition is not something you choose; it happens to you. The accurate version is: <em>when the network is partitioned, you must choose between linearizability and availability.</em> When the network works, you can have both. The C in CAP means linearizability specifically, and the A means that every node that has not failed answers every request, a stricter bar than most operators use.<span class="sidenote">CAP covers one consistency model and one kind of fault. It says nothing about slow links, crashed nodes, or weaker models, which limits how much it helps with real designs.</span></p>
+
+  <p>The more common reason to give up linearizability is speed. Even with no faults, a linearizable operation must coordinate with other nodes, so its response time is tied to network delay, and with the unpredictable delays of Chapter 8 that means slow tails. It has been proven that any linearizable register has response times at least proportional to the uncertainty in network delay; weaker models can answer from local state. Even the RAM of a multi-core CPU is not linearizable without memory barriers, for the same reason: speed, not fault tolerance.</p>
+
+  <p>In practice, keep linearizability for the few decisions that must be unique and immediate, such as locks, leases, and claims, and let the bulk of the data use something cheaper.</p>
+
+  <p class="book-ref">In the book: Chapter 9, "Linearizability" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch9-lin.js"></script>
+</body>
+</html>

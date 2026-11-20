@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Distributed transactions and two-phase commit · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch9.css">
+</head>
+<body data-lesson="two-phase-commit">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Distributed transactions and two-phase commit</h1>
+  </header>
+
+  <p>An online shop records a purchase in three places. The order service stores order 4471, the payment ledger charges the customer's account, and the inventory store takes two lamps out of stock. Each runs on its own node, perhaps on its own database. Either all three changes happen or none of them do: an order without a charge, or a charge without the stock, is a bug that someone will spend a week reconciling.</p>
+
+  <h2>Why you cannot just send commit to everyone</h2>
+  <p>On a single node, atomic commit is a solved problem. The storage engine makes the transaction's writes durable, then appends a commit record to its log, and that one disk write decides the outcome. Crash before it, and recovery rolls the transaction back; crash after it, and the transaction is committed.</p>
+
+  <p>With several nodes, the obvious approach is to send a commit request to each one. That fails in many ways. One node finds that a constraint is violated and must abort while the others commit. The request to another node is lost, and it times out and aborts. A third crashes before writing its commit record. The transaction ends up committed in some places and not in others. Nor can a commit simply be taken back afterwards: once committed, the data is visible to other transactions, which may already have acted on it. Undoing it later takes a new, compensating transaction.</p>
+
+  <p>So a node may commit only when it is sure that every other node will commit too. Arranging that certainty is the job of two-phase commit.</p>
+
+  <h2>Two-phase commit</h2>
+  <p>Two-phase commit (2PC) adds a <strong>coordinator</strong>, also called a transaction manager. While the transaction runs, the application reads and writes on each participant as usual, tagging the work with a global transaction ID from the coordinator. When the application asks to commit, the coordinator runs two phases.<span class="sidenote">Two-phase commit is unrelated to two-phase locking from Chapter 7. One decides commit across nodes; the other isolates transactions on one node.</span></p>
+
+  <p><strong>Phase 1, prepare.</strong> The coordinator asks every participant whether it can commit. A participant that answers yes must be able to commit later no matter what happens: it writes all of the transaction's data to disk, checks its constraints, and keeps its locks. By voting yes it gives up the right to abort on its own. That is the first point of no return.</p>
+
+  <p><strong>Phase 2, commit or abort.</strong> If every vote is yes, the coordinator decides to commit; if any vote is no or missing, it decides to abort. Before telling anyone, it writes the decision to its own log on disk. That write is the <strong>commit point</strong>, the second point of no return. From then on the decision must be carried out: if a message is lost or a participant is down, the coordinator retries for as long as it takes.</p>
+
+  <p>The protocol rests on those two promises. A participant cannot back out after voting yes, and the coordinator cannot change its mind after logging the decision.</p>
+
+  <figure class="widget" id="tpc">
+    <p class="widget-title">Two-phase commit, with crashes</p>
+    <p class="widget-sub">Step through the protocol. Between any two steps, crash or restart a node, or make the ledger vote no.</p>
+    <div class="btn-row">
+      <button class="btn primary" data-act="next">Next step</button>
+      <button class="btn" data-act="play" aria-pressed="false">Play</button>
+      <button class="btn" data-act="reset">Reset</button>
+      <label class="btn check"><input type="checkbox" id="tpc-no"> Payment ledger votes no</label>
+    </div>
+    <div class="btn-row">
+      <button class="btn" data-node="c" aria-pressed="false">Crash coordinator</button>
+      <button class="btn" data-node="0" aria-pressed="false">Crash order service</button>
+      <button class="btn" data-node="1" aria-pressed="false">Crash payment ledger</button>
+      <button class="btn" data-node="2" aria-pressed="false">Crash inventory store</button>
+    </div>
+    <div class="scroll-x"><svg class="ch9-svg" viewBox="0 0 640 340" aria-label="A coordinator above three participants, each showing its state, its locks, and its log"></svg></div>
+    <ol class="steps"></ol>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>Play the happy path first. Then reset and try these: crash the coordinator right after the votes come in; tick the box so the ledger votes no; crash the inventory store before the prepare request reaches it; and crash the coordinator after it has logged COMMIT but before it sends anything. Restart each crashed node and watch what recovery does.</p>
+
+  <h2>In doubt, holding locks</h2>
+  <p>The weak spot is the coordinator. If it crashes after the participants vote yes and before they hear the decision, those participants are <strong>in doubt</strong>. They cannot abort, because the coordinator may have logged commit and told someone else. They cannot commit, because it may have decided to abort. All they can do is wait, and while they wait they hold locks on the rows the transaction touched. Nobody else can change the order row, the account balance, or the stock count, and depending on the database, reads of them may block too.</p>
+
+  <p>In general the participants cannot settle it among themselves: if all of them voted yes and none heard a decision, none of them knows what the coordinator chose. This is why 2PC is called a <em>blocking</em> protocol. The clean way out is for the coordinator to come back and read its log. A commit or abort record gets sent again. No record at all means abort, which is safe because nobody can have been told to commit.</p>
+
+  <p>Three-phase commit (3PC) tries to remove the blocking with an extra round, so that participants learn the outcome before anyone commits. It only works if network delays are bounded and nodes always respond in a known time, so that a timeout reliably means a crash. Real networks give no such bound, as Chapter 8 showed, so 3PC is rarely used. The practical fix is to make the coordinator itself fault-tolerant, which requires consensus.</p>
+
+  <h2>Distributed transactions in practice</h2>
+  <p>Two quite different things are called distributed transactions. <strong>Database-internal</strong> ones run inside one product that is partitioned or replicated across nodes, such as Google Spanner, CockroachDB, YugabyteDB, TiDB, VoltDB, or MySQL NDB Cluster. All the nodes run the same software, so the protocol can be optimized, and the coordinator is often replicated with consensus. These work reasonably well.</p>
+
+  <p><strong>Heterogeneous</strong> transactions span different technologies, say a PostgreSQL database and a message broker. The standard is X/Open XA: not a network protocol but a C API, exposed in Java as JTA, that a transaction manager calls to drive prepare and commit on each resource. The transaction manager is often a library inside the application process, so its log sits on the application server's disk. That has sharp edges:</p>
+  <ul>
+    <li>The coordinator becomes a single point of failure. If the application server dies or loses its disk, every in-doubt transaction stays in doubt.</li>
+    <li>Application servers that were stateless and easy to replace now hold a log that must survive and be recovered.</li>
+    <li>XA is a lowest common denominator. It cannot detect deadlocks across systems, and it cannot carry serializable snapshot isolation across them.</li>
+    <li>It amplifies failures. If any participant is slow or down, the whole transaction waits, and so does everything blocked on its locks.</li>
+    <li>The extra disk flushes and round trips make these transactions much slower than local ones.</li>
+  </ul>
+
+  <p>Here is what a participant's side looks like in PostgreSQL, which supports 2PC directly:<span class="sidenote">PostgreSQL ships with <code>max_prepared_transactions</code> set to 0, which disables this until you raise it. MySQL offers the same steps as <code>XA PREPARE</code>, <code>XA COMMIT</code>, and <code>XA RECOVER</code>.</span></p>
+<pre><code>BEGIN;
+UPDATE stock SET count = count - 2 WHERE sku = 'lamp-02';
+PREPARE TRANSACTION 'order-4471';  -- vote yes; survives a restart
+
+-- later, on instruction from the coordinator
+COMMIT PREPARED 'order-4471';      -- or ROLLBACK PREPARED 'order-4471'
+
+-- after a crash: which transactions are still in doubt?
+SELECT gid, prepared, owner FROM pg_prepared_xacts;</code></pre>
+
+  <p>Sometimes in-doubt transactions outlive their coordinator, for example when its log is lost or corrupted. Then an administrator must look at each one and decide by hand whether to commit or roll back, ideally after checking what the other participants did. Most XA implementations also let a participant make a <em>heuristic decision</em>: commit or abort alone, without the coordinator. That frees the locks but may break atomicity, so treat it as an emergency tool, and monitor for prepared transactions that are older than a few minutes before they become an outage.</p>
+
+  <p>Many teams avoid heterogeneous distributed transactions altogether. They keep systems in step with an ordered log of changes and consumers that can safely process a message twice, an approach the stream processing chapters return to.</p>
+
+  <p class="book-ref">In the book: Chapter 9, "Distributed Transactions and Consensus" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch9-2pc.js"></script>
+</body>
+</html>
