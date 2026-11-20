@@ -165,7 +165,15 @@ function buildToc() {
   const toc = document.querySelector(".toc");
   const heads = [...document.querySelectorAll(".post h2")];
   if (!toc || heads.length < 2) return;
-  heads.forEach((h, i) => { if (!h.id) h.id = h.textContent.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `s${i}`; });
+  // Give each heading an id for its outline link, but never one already on the page:
+  // widget scripts find their figure by id, and a heading must not take it first.
+  heads.forEach((h, i) => {
+    if (h.id) return;
+    const base = h.textContent.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `s${i}`;
+    let id = base;
+    for (let k = 2; document.getElementById(id); k++) id = `${base}-${k}`;
+    h.id = id;
+  });
   toc.innerHTML = `<div class="toc-inner"><ul>${heads.map((h) => `<li><a href="#${h.id}">${h.textContent}</a></li>`).join("")}</ul></div>`;
   const links = [...toc.querySelectorAll("a")];
   const spy = () => {
