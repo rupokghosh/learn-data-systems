@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Batch processing with Unix tools · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch10.css">
+</head>
+<body data-lesson="unix-tools">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Batch processing with Unix tools</h1>
+  </header>
+
+  <p>Most of the systems in the earlier chapters answer questions as they arrive: a request comes in, the database looks something up, a response goes back. A large share of real data work looks nothing like that. Every night a job reads yesterday's orders and rebuilds the recommendations. Every hour a job rolls raw click events into a reporting table. Nobody is waiting on the other end of a socket. The job reads a large, bounded pile of input, grinds through all of it, and writes a pile of output.</p>
+  <p>That is batch processing, and the best place to start learning it is a terminal, because the tools that ship with every Unix system already embody most of the ideas that Hadoop and Spark later scaled up to thousands of machines.</p>
+
+  <h2>Services, batch jobs, and streams</h2>
+  <p>It helps to sort data systems by what they are waiting for. An <strong>online service</strong> waits for a request and is judged by response time and availability; a slow answer is a broken answer. A <strong>batch job</strong> takes a fixed input, runs for minutes or hours, and is judged by throughput: how much data it gets through per unit of time.<span class="sidenote">Throughput is also why batch jobs are usually scheduled rather than triggered. The user never sees the latency of one record, only whether the report was ready by morning.</span> A <strong>stream processor</strong> sits between the two: it consumes input as it arrives, like a service, but it does not answer a caller, like a batch job. The next chapter covers streams. This one stays with bounded input.</p>
+
+  <h2>A log report in one line of shell</h2>
+  <p>Suppose you run the web site for a small bakery and want to know which pages are requested most often. The web server writes one line per request: a timestamp, the client address, the method, the path, the status code, and the time taken. Five standard programs, joined by pipes, answer the question:</p>
+
+<pre><code>cat access.log |
+  awk '{print $4}' |   # keep only the path
+  sort |               # bring equal paths together
+  uniq -c |            # count each run of equal lines
+  sort -rn |           # biggest count first
+  head -n 5            # top five</code></pre>
+
+  <p>Each program reads lines on its standard input and writes lines on its standard output. None of them knows what came before it or what comes after. Walk through the stages below and watch the data change shape.</p>
+
+  <figure class="widget" id="pipe">
+    <p class="widget-title">The pipeline, one stage at a time</p>
+    <p class="widget-sub">Click a stage or press Next. Switch the field being counted, or open the editor and change the log.</p>
+    <div class="btn-row" role="group" aria-label="Field to count">
+      <button type="button" class="btn" data-field="path" aria-pressed="true">Count paths ($4)</button>
+      <button type="button" class="btn" data-field="ip" aria-pressed="false">Count client IPs ($2)</button>
+      <button type="button" class="btn" data-field="status" aria-pressed="false">Count status codes ($5)</button>
+    </div>
+    <div class="pipe-stages"></div>
+    <div class="btn-row">
+      <button type="button" class="btn" data-act="prev">Back</button>
+      <button type="button" class="btn primary" data-act="next">Next stage</button>
+      <button type="button" class="btn" data-act="play" aria-pressed="false">Play</button>
+    </div>
+    <p class="lane-label"><span data-out="label"></span><span data-out="count"></span></p>
+    <div class="pipe-out" aria-live="polite"></div>
+    <p class="note" data-out="explain"></p>
+    <details class="pipe-edit">
+      <summary>Edit the log lines</summary>
+      <div class="controls"><div class="control"><label for="pipe-head">Lines kept by head <output></output></label><input id="pipe-head" type="range" min="1" max="10" step="1" value="5"></div></div>
+      <textarea class="logedit" spellcheck="false" aria-label="Access log lines, one request per line"></textarea>
+      <div class="btn-row" style="margin-top:8px"><button type="button" class="btn" data-act="restore">Restore the sample log</button></div>
+    </details>
+  </figure>
+
+  <p>Try counting client addresses: one address that keeps asking for <code>/wp-login.php</code> and getting 404 is someone scanning for a WordPress install that this site does not have. Changing the question meant changing one argument to <code>awk</code>. The rest of the pipeline did not care.</p>
+
+  <h2>Hash table or sort?</h2>
+  <p>The same report is easy to write as an ordinary program. Read each line, pull out the path, and bump a counter in a dictionary:</p>
+
+<pre><code>counts = {}
+for line in open("access.log"):
+    path = line.split()[3]
+    counts[path] = counts.get(path, 0) + 1
+for path, n in sorted(counts.items(), key=lambda kv: -kv[1])[:5]:
+    print(n, path)</code></pre>
+
+  <p>For this log, the dictionary version is faster: it reads the file once and never sorts the full list of requests. The difference shows up when the number of <em>distinct</em> keys grows. The hash table must hold every distinct key in memory at once, plus per-entry overhead. The sort-based pipeline never needs that. GNU <code>sort</code> fills a fixed buffer, sorts it, writes it to a temporary file as a sorted run, and repeats; at the end it merges the runs, reading each one sequentially.<span class="sidenote">The buffer size is set with <code>sort -S</code>, and <code>--parallel</code> lets it use several cores. Sorted runs merged from disk are the same trick an LSM-tree uses for its segments.</span> Memory stays flat while the input grows, and the disk is read and written in long sequential passes, which disks are good at.</p>
+
+  <figure class="widget" id="mem">
+    <p class="widget-title">Memory needed as distinct keys grow</p>
+    <p class="widget-sub">Drag the number of distinct keys past the red line and see which approach survives.</p>
+    <div class="controls">
+      <div class="control"><label for="mem-keys">Distinct keys <output></output></label><input id="mem-keys" type="range" min="3" max="10" step="0.1" value="6"></div>
+      <div class="control"><label for="mem-bytes">Average key size <output></output></label><input id="mem-bytes" type="range" min="10" max="200" step="2" value="40"></div>
+      <div class="control"><label for="mem-ram">Machine memory <output></output></label><input id="mem-ram" type="range" min="1" max="10" step="1" value="4"></div>
+    </div>
+    <div class="chart"></div>
+    <div class="legend"><span><i style="background:var(--accent)"></i>In-memory hash table</span><span><i style="background:var(--green)"></i>Sort with a 1 GB buffer</span><span><i style="background:var(--red)"></i>Machine memory</span></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Hash table needs</div><div class="stat-value" data-out="hash"></div></div>
+      <div class="stat"><div class="stat-label">Sort holds in memory</div><div class="stat-value" data-out="sortmem"></div></div>
+      <div class="stat"><div class="stat-label">Sorted runs on disk</div><div class="stat-value sm" data-out="spill"></div></div>
+      <div class="stat"><div class="stat-label">Merge passes</div><div class="stat-value" data-out="passes"></div></div>
+    </div>
+    <div class="verdict"></div>
+    <figcaption>Rough model: each hash table entry costs the key plus 48 bytes of overhead, and each distinct key appears ten times in the log. Sort merges up to 16 runs at a time, which is the GNU default.</figcaption>
+  </figure>
+
+  <p>Neither approach is better in general. If the working set fits in memory, count in memory. If it might not, sort first, because sorting degrades gracefully into disk I/O while a hash table degrades into swapping and then into an out-of-memory kill. Distributed batch systems lean heavily on the sorting side of this trade-off, as the next lesson shows.</p>
+
+  <h2>Why the pieces compose</h2>
+  <p>The striking thing about the pipeline is that five programs written by different people, decades apart, snap together with no glue code. A few design choices make that work.</p>
+  <p><strong>One uniform interface.</strong> Every program reads and writes a stream of bytes, by convention a sequence of newline-separated text records. Any output can become any input. Compare that with two arbitrary services in a company, which usually need an adapter, a schema negotiation, and a meeting before they can exchange data.</p>
+  <p><strong>Logic separated from wiring.</strong> <code>uniq</code> does not open files or decide where its output goes. The shell connects standard output to the next standard input. The program contains only its logic, so the person composing the pipeline decides the wiring, and can redirect to a file, a network socket, or another program without touching the code.<span class="sidenote">Programs that need several inputs or outputs fit this model less well, which is one reason larger systems added their own job schedulers.</span></p>
+  <p><strong>Inputs are never modified.</strong> Running the pipeline does not change <code>access.log</code>. You can run it again, compare outputs, and try variations freely. A bad experiment costs nothing.</p>
+  <p><strong>Transparency.</strong> You can stop the pipeline at any stage and look at the intermediate output, exactly as the step-through above does, or pipe a stage into <code>less</code> to see whether it does what you expected. Debugging is reading text.</p>
+
+  <h2>Where a single machine runs out</h2>
+  <p>The limitation is in the name of the tool: a pipe connects processes on one machine. When the log is ten terabytes spread across a hundred servers, a single <code>sort</code> is bounded by one machine's disks and cores, however clever its buffering. The interesting question is whether the same ideas, uniform files, small programs that do one thing, immutable inputs, and sorting as the workhorse, can be spread across a cluster. MapReduce was the first widely used answer, and it is close to a distributed version of this pipeline.</p>
+
+  <p class="book-ref">In the book: Chapter 10, "Batch Processing with Unix Tools" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch10-unix.js"></script>
+</body>
+</html>

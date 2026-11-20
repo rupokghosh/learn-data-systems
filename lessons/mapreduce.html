@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MapReduce and distributed filesystems · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch10.css">
+</head>
+<body data-lesson="mapreduce">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>MapReduce and distributed filesystems</h1>
+  </header>
+
+  <p>A Unix pipeline reads files, transforms them with small programs, and writes files. MapReduce keeps that shape and spreads it over a cluster. The files live in a filesystem that spans hundreds or thousands of machines, the small programs run as many parallel tasks, and the sort in the middle of the pipeline becomes a cluster-wide sort that moves data between machines.</p>
+  <p>Google described MapReduce in 2004, and Hadoop made an open source version that defined big data infrastructure for the following decade. Few teams write raw MapReduce jobs today, but Spark, Flink, Hive, and the query engines that replaced it all inherit its model. Understanding the original makes the descendants much easier to reason about.</p>
+
+  <h2>A filesystem spread across machines</h2>
+  <p>A MapReduce job reads its input from, and writes its output to, a distributed filesystem. In Hadoop that is <strong>HDFS</strong>. Every machine in the cluster runs a <em>DataNode</em> daemon that stores chunks of files on its local disks. A single <em>NameNode</em> keeps the metadata: which blocks make up each file, and which machines hold a copy of each block.<span class="sidenote">The NameNode is a single point of failure unless you run a standby with automatic failover, which typically uses ZooKeeper to decide who is active.</span> Files are cut into large blocks, 128 MB by default, and each block is replicated to several machines, usually three, preferably in different racks.</p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 262" role="img" aria-label="A 384 MB file is split into three blocks. The NameNode records which three DataNodes hold each block. Each of five DataNodes stores one or two block replicas.">
+      <text x="0" y="16" class="diagram-label">views-2026-03.log, 384 MB</text>
+      <g>
+        <rect x="0" y="26" width="90" height="30" rx="4" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="45" y="45" text-anchor="middle" class="diagram-sub" style="fill:var(--ink)">block 1</text>
+        <rect x="92" y="26" width="90" height="30" rx="4" style="fill:var(--orange-soft);stroke:var(--orange)"/><text x="137" y="45" text-anchor="middle" class="diagram-sub" style="fill:var(--ink)">block 2</text>
+        <rect x="184" y="26" width="90" height="30" rx="4" style="fill:var(--green-soft);stroke:var(--green)"/><text x="229" y="45" text-anchor="middle" class="diagram-sub" style="fill:var(--ink)">block 3</text>
+      </g>
+      <text x="0" y="74" class="diagram-sub">128 MB each</text>
+
+      <g class="dg-node active"><rect x="352" y="8" width="288" height="96" rx="8"/><text x="366" y="30">NameNode: metadata only</text>
+        <text x="366" y="52" class="sub" style="font-family:var(--mono)">block 1 → A, C, D</text>
+        <text x="366" y="70" class="sub" style="font-family:var(--mono)">block 2 → B, D, E</text>
+        <text x="366" y="88" class="sub" style="font-family:var(--mono)">block 3 → A, B, E</text></g>
+
+      <g style="stroke:var(--line-2);stroke-width:1.2;stroke-dasharray:4 4">
+        <line x1="400" y1="106" x2="58" y2="166"/><line x1="440" y1="106" x2="190" y2="166"/><line x1="480" y1="106" x2="320" y2="166"/><line x1="520" y1="106" x2="450" y2="166"/><line x1="560" y1="106" x2="582" y2="166"/>
+      </g>
+      <text x="0" y="118" class="diagram-sub">DataNodes send heartbeats and block reports</text>
+
+      <g class="dg-node"><rect x="0" y="168" width="116" height="74" rx="8"/><text x="12" y="188">DataNode A</text></g>
+      <g class="dg-node"><rect x="131" y="168" width="116" height="74" rx="8"/><text x="143" y="188">DataNode B</text></g>
+      <g class="dg-node"><rect x="262" y="168" width="116" height="74" rx="8"/><text x="274" y="188">DataNode C</text></g>
+      <g class="dg-node"><rect x="393" y="168" width="116" height="74" rx="8"/><text x="405" y="188">DataNode D</text></g>
+      <g class="dg-node"><rect x="524" y="168" width="116" height="74" rx="8"/><text x="536" y="188">DataNode E</text></g>
+      <g style="font:11px var(--sans)">
+        <rect x="12" y="200" width="44" height="28" rx="3" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="34" y="218" text-anchor="middle" style="fill:var(--ink)">b1</text>
+        <rect x="60" y="200" width="44" height="28" rx="3" style="fill:var(--green-soft);stroke:var(--green)"/><text x="82" y="218" text-anchor="middle" style="fill:var(--ink)">b3</text>
+        <rect x="143" y="200" width="44" height="28" rx="3" style="fill:var(--orange-soft);stroke:var(--orange)"/><text x="165" y="218" text-anchor="middle" style="fill:var(--ink)">b2</text>
+        <rect x="191" y="200" width="44" height="28" rx="3" style="fill:var(--green-soft);stroke:var(--green)"/><text x="213" y="218" text-anchor="middle" style="fill:var(--ink)">b3</text>
+        <rect x="274" y="200" width="44" height="28" rx="3" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="296" y="218" text-anchor="middle" style="fill:var(--ink)">b1</text>
+        <rect x="405" y="200" width="44" height="28" rx="3" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="427" y="218" text-anchor="middle" style="fill:var(--ink)">b1</text>
+        <rect x="453" y="200" width="44" height="28" rx="3" style="fill:var(--orange-soft);stroke:var(--orange)"/><text x="475" y="218" text-anchor="middle" style="fill:var(--ink)">b2</text>
+        <rect x="536" y="200" width="44" height="28" rx="3" style="fill:var(--orange-soft);stroke:var(--orange)"/><text x="558" y="218" text-anchor="middle" style="fill:var(--ink)">b2</text>
+        <rect x="584" y="200" width="44" height="28" rx="3" style="fill:var(--green-soft);stroke:var(--green)"/><text x="606" y="218" text-anchor="middle" style="fill:var(--ink)">b3</text>
+      </g>
+      <text x="0" y="260" class="diagram-sub">Any two DataNodes can fail and every block still has a live copy.</text>
+    </svg>
+    </div>
+    <figcaption>Clients ask the NameNode where a block lives, then read the bytes straight from a DataNode. File data never passes through the NameNode.</figcaption>
+  </figure>
+
+  <p>The machines are ordinary servers with local disks, connected by a regular datacenter network; no special shared storage is involved. Hadoop 3 can replace plain replication with erasure coding, which survives the same failures with about half the extra storage. In cloud deployments the same role is often played by an object store such as Amazon S3, which trades data locality for elastic, separately billed storage.</p>
+
+  <h2>The anatomy of a job</h2>
+  <p>As a programmer you write two functions. The <strong>mapper</strong> is called once for every input record and may emit any number of key-value pairs. The <strong>reducer</strong> is called once for every distinct key, with an iterator over all the values emitted for that key. The framework does everything in between, and that in-between part is where most of the work happens.</p>
+  <p>The job below counts how often each product was viewed in a small shop. Each input record is a user ID and a product. The mapper emits <code>(product, 1)</code>; the reducer adds up the ones. Step through it, and try killing a map task partway through the map phase.</p>
+
+  <figure class="widget" id="mr">
+    <p class="widget-title">A MapReduce job, record by record</p>
+    <p class="widget-sub">Step or Play. During the map phase, kill a map task and watch the scheduler recover.</p>
+    <div class="btn-row">
+      <button type="button" class="btn primary" data-act="step">Step</button>
+      <button type="button" class="btn" data-act="play" aria-pressed="false">Play</button>
+      <button type="button" class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="btn-row">
+      <button type="button" class="btn" data-kill="0">Kill map task 1</button>
+      <button type="button" class="btn" data-kill="1">Kill map task 2</button>
+      <button type="button" class="btn" data-kill="2">Kill map task 3</button>
+    </div>
+    <div class="mr-board"></div>
+    <div class="verdict b10-log" aria-live="polite"></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Phase</div><div class="stat-value" data-out="phase"></div></div>
+      <div class="stat"><div class="stat-label">Map task attempts</div><div class="stat-value" data-out="attempts"></div></div>
+      <div class="stat"><div class="stat-label">Pairs emitted</div><div class="stat-value" data-out="emitted"></div></div>
+      <div class="stat"><div class="stat-label">Pairs shuffled</div><div class="stat-value" data-out="shuffled"></div></div>
+    </div>
+  </figure>
+
+  <p>Four things happen between the two functions you wrote. Each map task hashes the key of every pair it emits to pick a <strong>partition</strong>, one per reducer, so every pair for a given product lands at the same reducer. Before writing its output to local disk, the map task <strong>sorts</strong> each partition by key, spilling sorted runs to disk if they do not fit in memory, just like the Unix <code>sort</code>. When a map task finishes, each reducer <strong>fetches</strong> its partition from that task over the network. Finally each reducer <strong>merges</strong> the sorted runs it collected, which brings all the values for one key together, and calls your reducer once per key.<span class="sidenote">The fetch-and-merge step is called the <em>shuffle</em>, a slightly unlucky name: nothing about it is random. It is a distributed sort.</span></p>
+  <p>Notice that partition 1 received fewer pairs than partition 2. Hashing spreads keys evenly only on average, and a key that is much more common than the others always lands in a single partition. That problem gets its own section in the lesson on joins.</p>
+
+  <h2>Moving the code, not the data</h2>
+  <p>The scheduler starts one map task per input block and tries to run it on a machine that already stores a replica of that block. A mapper's input is then read from local disk, and the only thing that crosses the network at startup is the job's code, which is a few megabytes, rather than the data, which may be terabytes. When no replica holder has a free slot, the scheduler settles for a machine in the same rack. The number of reduce tasks is not tied to the input; the job author chooses it.</p>
+  <p>The shuffle is the one phase where data must cross the network in bulk, which is why so much of the craft of writing batch jobs is about shrinking the map output. A common trick is a <em>combiner</em>, a mini reducer that runs on the map side: for a count, it can turn a thousand <code>(kettle, 1)</code> pairs into a single <code>(kettle, 1000)</code> before anything is sent.</p>
+
+  <h2>Workflows of chained jobs</h2>
+  <p>One MapReduce job can do one grouping. Real pipelines, such as computing which products to recommend to whom, need many, so jobs are chained: the output directory of one job becomes the input directory of the next. Unlike a Unix pipe, which streams bytes from one process to the next as they are produced, the next job in a chain can start only after every task of the previous job has finished and its output is fully written. Workflow schedulers such as Apache Oozie, Azkaban, and later Airflow manage these dependencies, and higher-level tools such as Pig, Hive, and Cascading compile a whole query into a chain of jobs for you. A workflow of fifty jobs is not unusual. The cost of all those intermediate files is the subject of the last lesson in this chapter.</p>
+
+  <h2>Failure is a normal event</h2>
+  <p>On a cluster of thousands of machines, some task fails in almost every large job: a disk dies, a machine is rebooted for a kernel patch, or a higher-priority service preempts the task's resources. MapReduce handles this simply. If a task fails, the scheduler runs it again, ideally on another machine holding a replica of the same block. The output of the failed attempt is thrown away.</p>
+  <p>That only works because of two properties. The input files are never modified, so a second attempt reads exactly what the first one read. And map and reduce functions are expected to have no side effects beyond their output, so running a task twice produces the same result as running it once. If a reducer wrote to an external database as it went, a retried attempt would write everything a second time. Output files are written to a temporary location and renamed into place only when the task succeeds, so readers never see half of an attempt.<span class="sidenote">If a machine dies after its map task finished but before every reducer fetched the output, the map task has to run again too: its output lived on that machine's local disk, not in HDFS.</span></p>
+  <p>This design accepts doing some work twice in exchange for never having to coordinate a recovery. For a job that runs for hours on thousands of machines, that is a very good trade.</p>
+
+  <p class="book-ref">In the book: Chapter 10, "MapReduce and Distributed Filesystems" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch10-mapreduce.js"></script>
+</body>
+</html>

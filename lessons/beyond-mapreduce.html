@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beyond MapReduce · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch10.css">
+</head>
+<body data-lesson="beyond-mapreduce">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Beyond MapReduce</h1>
+  </header>
+
+  <p>MapReduce proved that ordinary programmers could process petabytes on unreliable hardware. It also turned out to be a clumsy way to express most real jobs, and a slow way to run them. The systems that replaced it, Apache Spark, Apache Tez, and Apache Flink among them, kept the important ideas: partitioning by key, deterministic tasks, and recovery by re-execution. What they changed was how a multi-step workflow is planned and where its intermediate data lives.</p>
+
+  <h2>The cost of writing every step down</h2>
+  <p>In a chain of MapReduce jobs, the output of every job is written to the distributed filesystem before the next one starts. That output is called <strong>intermediate state</strong>: no one wants it for its own sake, it only exists to pass data from one job to the next. Making it a real file has three costs. Each byte is replicated to several machines, so it crosses the network and hits disk several times over. A job cannot begin until every task of the job before it has finished, so a single straggler stalls the whole chain. And the next job often begins with a mapper that does nothing but read the file back and pass records through to a shuffle.</p>
+  <p>The upside is real too. A file is easy to inspect when something goes wrong, and if a later job fails, it can restart from the last file without redoing anything earlier. The Unix pipe makes the opposite choice: it streams data between processes through a small buffer and writes nothing down.</p>
+
+  <h2>Dataflow engines</h2>
+  <p>A dataflow engine treats the whole workflow as one job, a graph of <em>operators</em>. An operator is a function like a mapper or a reducer, but the engine is free to connect operators in more ways than map-then-reduce: repartition and sort by key, repartition without sorting when only grouping is needed, broadcast one input to every task, or simply pass records along to the next operator on the same machine. Sorting happens only where an operator actually needs it.</p>
+  <p>Because the engine sees the whole graph, it can keep intermediate data in memory or spill it to local disk without replication, schedule each task near its input, start an operator as soon as its input is ready, and reuse worker processes rather than starting a fresh JVM for every task. A shuffle is still a barrier, since a sort cannot emit its first record until it has seen its last input, but steps that need no shuffle run as a pipeline.</p>
+
+  <figure class="widget" id="flow">
+    <p class="widget-title">The same three-stage job, two ways</p>
+    <p class="widget-sub">Change the input size and the replication factor, then lose a machine during the last stage.</p>
+    <div class="controls">
+      <div class="control"><label for="flow-size">Input size <output></output></label><input id="flow-size" type="range" min="20" max="2000" step="20" value="200"></div>
+      <div class="control"><label for="flow-rep">DFS replication <output></output></label><input id="flow-rep" type="range" min="1" max="3" step="1" value="3"></div>
+    </div>
+    <div class="btn-row"><label class="btn check"><input type="checkbox" id="flow-fail"> Lose a machine during stage 3</label></div>
+    <div class="chart"></div>
+    <div class="legend">
+      <span><i style="background:var(--ink-4)"></i>Job startup</span>
+      <span><i style="background:var(--purple)"></i>Read from DFS</span>
+      <span><i style="background:var(--accent)"></i>Compute</span>
+      <span><i style="background:var(--orange)"></i>Write to DFS, replicated</span>
+      <span><i style="background:var(--green)"></i>Spill to local disk</span>
+      <span><i style="background:var(--red)"></i>Recompute</span>
+      <span><i style="background:repeating-linear-gradient(45deg, var(--line-2) 0 2px, transparent 2px 4px)"></i>Waiting</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">MapReduce chain</div><div class="stat-value" data-out="mr"></div></div>
+      <div class="stat"><div class="stat-label">Dataflow engine</div><div class="stat-value" data-out="df"></div></div>
+      <div class="stat"><div class="stat-label">DFS writes, MapReduce</div><div class="stat-value" data-out="mrb"></div></div>
+      <div class="stat"><div class="stat-label">DFS writes, dataflow</div><div class="stat-value" data-out="dfb"></div></div>
+    </div>
+    <div class="verdict"></div>
+    <figcaption>A simplified model with cluster-wide throughput figures. Stage 1 shrinks the data to 80 percent, stage 2 to 30 percent, and stage 3 to 5 percent of the input. Stages 1 and 2 are separated by a shuffle; stage 3 needs none, so the dataflow engine pipelines it behind stage 2.</figcaption>
+  </figure>
+
+  <h2>Fault tolerance from lineage</h2>
+  <p>Without durable intermediate files, a dataflow engine needs another way to recover from a lost machine. Spark tracks the <strong>lineage</strong> of every partition of data: which input it was computed from and which operators were applied. When a partition is lost, Spark recomputes just that partition from the closest ancestor that still exists, which may be the original input. Flink takes a different route and periodically checkpoints operator state, so it can roll back to a recent consistent point.</p>
+  <p>Recomputation is only safe if it reproduces the same data. If an operator depends on iteration order of a hash table, a random number, or the current time, a recomputed partition may differ from the lost one, and every downstream partition that consumed the old version is now inconsistent and has to be recomputed as well. Engines therefore push operators to be deterministic, and the reliable fix is to seed randomness and avoid reading clocks inside a job. When recomputing a partition would be expensive, for example because the intermediate data is much smaller than the input it came from, it is cheaper to write that intermediate result down after all. Spark exposes exactly that choice as <code>checkpoint()</code>.<span class="sidenote">The failure toggle above shows the trade: the dataflow engine is faster overall, but the one task it loses costs more to rebuild than a re-run from a materialized file.</span></p>
+
+  <h2>Graphs and iterative processing</h2>
+  <p>Some algorithms are naturally iterative: PageRank, shortest paths, connected components, and many machine learning methods repeat a step until the result stops changing. Expressed as MapReduce, each iteration is a full job that reads the entire graph and writes it out again, even when only a few vertices changed.</p>
+  <p>The <strong>bulk synchronous parallel</strong> model, made popular by Google's Pregel paper and implemented by Apache Giraph, Spark GraphX, and Flink's Gelly, does better. Each vertex has a value and runs a small function. In each round, called a <em>superstep</em>, a vertex reads the messages sent to it in the previous superstep, updates its value, and sends messages along its edges. Vertex state stays in memory between supersteps, and a vertex that receives no messages does no work. The computation ends when no messages are sent.</p>
+
+  <figure class="widget" id="pregel">
+    <p class="widget-title">Supersteps on a small graph</p>
+    <p class="widget-sub">Step through the supersteps. The small dot on each vertex shows which of three workers holds it.</p>
+    <div class="btn-row" role="group" aria-label="Algorithm">
+      <button type="button" class="btn" data-mode="hops" aria-pressed="true">Hops from a source</button>
+      <button type="button" class="btn" data-mode="components" aria-pressed="false">Connected components</button>
+    </div>
+    <div class="btn-row">
+      <button type="button" class="btn primary" data-act="step">Next superstep</button>
+      <button type="button" class="btn" data-act="play" aria-pressed="false">Play</button>
+      <button type="button" class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="scroll-x"><svg viewBox="0 0 670 306" role="img" aria-label="A graph of eleven vertices in two connected components. Values inside each vertex change as messages arrive."></svg></div>
+    <div class="legend">
+      <span><i style="background:var(--purple);border-radius:50%"></i>Worker 1</span>
+      <span><i style="background:var(--green);border-radius:50%"></i>Worker 2</span>
+      <span><i style="background:var(--ink-3);border-radius:50%"></i>Worker 3</span>
+      <span><i style="background:var(--orange);border-radius:50%"></i>Message in flight</span>
+      <span><i style="background:var(--accent-soft);border:1px solid var(--accent);border-radius:50%"></i>Value changed this superstep</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Superstep</div><div class="stat-value" data-out="ss"></div></div>
+      <div class="stat"><div class="stat-label">Sent this superstep</div><div class="stat-value sm" data-out="now"></div></div>
+      <div class="stat"><div class="stat-label">Messages in total</div><div class="stat-value" data-out="total"></div></div>
+      <div class="stat"><div class="stat-label">Crossed between workers</div><div class="stat-value" data-out="cross"></div></div>
+    </div>
+    <div class="verdict" aria-live="polite"></div>
+  </figure>
+
+  <p>Count how many messages cross between workers. Vertices are usually assigned to workers by hashing their ID, so neighbors rarely share a machine, and most messages go over the network. Every superstep also ends with a barrier where all workers wait for the slowest. Fault tolerance comes from checkpointing all vertex state at the end of a superstep and rolling everything back to the checkpoint if a worker dies. For graphs that fit in the memory of one large machine, a single-threaded program often beats a distributed graph engine for exactly these reasons.</p>
+
+  <h2>High-level APIs and declarative queries</h2>
+  <p>Writing raw map and reduce functions was laborious, so higher-level tools appeared almost at once: Hive put SQL on top of MapReduce, and Pig offered a scripting language of relational operations. Today the same idea appears as Spark SQL and DataFrames, Flink's Table API, and engines such as Trino. You describe joins, filters, and aggregations, and the engine turns them into a dataflow graph.</p>
+  <p>The declarative part matters more than the convenience. When the engine knows that an operation is a join rather than an arbitrary function, a query optimizer can choose the join algorithm from the previous lesson by itself: broadcast the small table, or shuffle both sides, based on table statistics. Knowing which columns a query uses lets it read only those columns from a columnar format such as Parquet, and knowing the types lets it generate compact, vectorized code instead of calling a function per record. Batch engines borrowed these techniques from analytic databases, and the two families have largely converged. The difference that remains is flexibility: a batch engine still lets you drop into arbitrary code for the steps that SQL cannot express, such as training a model or parsing an unusual file format.</p>
+
+  <p class="book-ref">In the book: Chapter 10, "Beyond MapReduce" and "Graphs and Iterative Processing" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch10-beyond.js"></script>
+</body>
+</html>

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Joins in batch processing · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch10.css">
+</head>
+<body data-lesson="batch-joins">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Joins in batch processing</h1>
+  </header>
+
+  <p>In an OLTP database, a join usually touches a handful of rows found through an index. A batch job joins entire datasets: it reads every record on both sides and must bring each one together with its partners, scattered across hundreds of machines. How it arranges that meeting decides how much data crosses the network, how much memory each task needs, and whether one unlucky task holds up the whole job.</p>
+
+  <h2>Why batch jobs join whole datasets</h2>
+  <p>Picture a music streaming service. Its players send a stream of listening events, each carrying a user ID and a track, and land them in the distributed filesystem as log files. The analysts want plays per subscription plan, so every event needs the plan of the user who generated it, which lives in the users table of the production database.</p>
+  <p>Looking up each event's user in that database as the job runs works badly. A billion events would mean a billion queries against a database sized for interactive traffic, throughput would be capped by round trips, and the answer would depend on what the database contained at each moment, so a rerun could give a different result. The batch approach is to put a snapshot of the users table, such as a nightly export, in the same filesystem and join the two datasets with the same machinery that does everything else.<span class="sidenote">Determinism matters more than it looks: a job you can rerun and get the same answer from is a job you can debug.</span></p>
+
+  <h2>Sort-merge joins on the reduce side</h2>
+  <p>The most general strategy uses the MapReduce shuffle directly. One set of mappers reads events and emits each with the user ID as its key. Another set reads the users snapshot and emits each user record, also keyed by user ID. The partitioner sends every record for a given user to the same reducer, and the sort brings them next to each other.</p>
+  <p>One refinement makes the reducer cheap. The framework can be told to sort not only by key but also by a secondary field, so that within each user the user record always arrives before that user's events. This is a <strong>secondary sort</strong>. The reducer then reads the user record, keeps it in a local variable, and streams through the events that follow, writing out each event with the plan attached. It never holds more than one user record in memory, however large either dataset is.</p>
+  <p>The pattern is more general than joins. Partitioning and sorting by key means "deliver every record with this key to the same place," which also powers <code>GROUP BY</code> aggregation and sessionization. The application only chooses the key; the framework handles the network and the retries.</p>
+
+  <figure class="widget" id="joins">
+    <p class="widget-title">Where records go in three join strategies</p>
+    <p class="widget-sub">Pick a strategy and run the join. Then make user 3 hugely popular and try each strategy again.</p>
+    <div class="btn-row" role="group" aria-label="Join strategy">
+      <button type="button" class="btn" data-strat="sortmerge" aria-pressed="true">Sort-merge (reduce side)</button>
+      <button type="button" class="btn" data-strat="broadcast" aria-pressed="false">Broadcast hash</button>
+      <button type="button" class="btn" data-strat="partitioned" aria-pressed="false">Partitioned hash</button>
+    </div>
+    <div class="btn-row">
+      <label class="btn check"><input type="checkbox" id="jn-skew"> User 3 is hugely popular</label>
+      <label class="btn check"><input type="checkbox" id="jn-split"> Split the hot key</label>
+    </div>
+    <div class="btn-row">
+      <button type="button" class="btn primary" data-act="run">Run the join</button>
+      <button type="button" class="btn" data-act="reset">Put records back</button>
+    </div>
+    <div class="jn-board"></div>
+    <div class="legend">
+      <span><i style="background:var(--accent-soft);border:1px solid var(--accent)"></i>Listening event (number is the user)</span>
+      <span><i style="background:var(--green)"></i>User record</span>
+      <span><i style="background:var(--orange-soft);border:1px solid var(--orange)"></i>Hot user</span>
+      <span><i style="background:var(--bg);box-shadow:0 0 0 1.5px var(--ink-3)"></i>Crossed the network</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Records over the network</div><div class="stat-value" data-out="net"></div></div>
+      <div class="stat"><div class="stat-label">Memory per task, at most</div><div class="stat-value" data-out="mem"></div></div>
+      <div class="stat"><div class="stat-label">Slowest task vs median</div><div class="stat-value" data-out="ratio"></div></div>
+      <div class="stat"><div class="stat-label">Events joined</div><div class="stat-value" data-out="joined"></div></div>
+    </div>
+    <div class="verdict" aria-live="polite"></div>
+    <figcaption>Work per task counts every record a task reads, including the users it loads. Splitting the hot key applies to the reduce-side join only.</figcaption>
+  </figure>
+
+  <h2>When one key is hot</h2>
+  <p>Partitioning by key assumes that keys are roughly equally common. Real data disagrees. A celebrity account, a bot, a default value such as an empty string, or a single giant customer can own a large fraction of all records. Every one of those records hashes to the same reducer, which then runs for hours after the others have finished. A job is only done when its slowest task is done, so one <strong>straggler</strong> sets the completion time for everyone.</p>
+  <p>The fix is to stop sending the hot key to a single place. Pig's skewed join first runs a quick sampling job to find out which keys are hot. For those keys it deals the records from the large side out across several reducers, chosen at random, and copies the matching record from the other side to every one of those reducers. Each copy of the user record meets a share of the events, and the join is still correct. Hot-key aggregations use a related two-stage trick: group by the key plus a random suffix, then combine the partial results by the real key.<span class="sidenote">Spark 3 does this automatically with adaptive query execution: it notices oversized shuffle partitions at runtime and splits them.</span></p>
+
+  <h2>Joins without a reduce phase</h2>
+  <p>The reduce-side join assumes nothing about its inputs, and pays for that by shuffling all of both of them. If you know more about the inputs, you can skip the shuffle and do the join in the mappers.</p>
+  <p><strong>Broadcast hash join.</strong> When one side is small enough to fit in memory, every mapper reads the whole small side into a hash table and then streams its block of the large side, probing the table for each record. The large side never moves. Pig calls this a replicated join, Hive a map join, and Spark a broadcast join; Spark picks it on its own when a table is below a size threshold.</p>
+  <p><strong>Partitioned hash join.</strong> When both inputs were written with the same partitioning, the same key, the same hash function, and the same number of partitions, each mapper only needs the matching partition of the small side. Its hash table is a fraction of the size. Hive calls this a bucketed map join. The catch is that some earlier job must have produced that layout, and the assumption has to be kept true for as long as anyone relies on it.</p>
+  <p><strong>Map-side merge join.</strong> If the partitioned inputs are also sorted by the key, a mapper does not need a hash table at all: it reads both files in parallel and merges them, the way a reducer would after the shuffle.</p>
+  <p>The output differs too. A reduce-side join produces output partitioned and sorted by the join key. A map-side join produces output partitioned like its large input. Knowing which you have matters for the next job in the workflow, because it decides whether that job can also skip a shuffle.</p>
+
+  <h2>What batch workflows produce</h2>
+  <p>The output of a batch job is rarely a report for a person. More often it is a data structure for another system to serve. Building search indexes was Google's original use for MapReduce: documents are partitioned, each reducer builds the index for its partition, and the index files are copied to the search servers. Another common output is a key-value database, such as the recommendations for each user, built as complete files inside the job and then loaded by a read-only serving store. Voldemort, Terrapin, and ElephantDB worked this way, and HBase can bulk load files built the same way.</p>
+  <p>The tempting alternative, writing to the production database one record at a time from inside the job, is usually wrong. It is slow, it can overwhelm a database that is also serving users, and when a task fails and is retried, its half-finished writes are already visible and will be written again.</p>
+  <p>Immutable outputs bring back what made the Unix pipeline pleasant. A buggy job can be fixed and rerun, or the serving system pointed back at yesterday's files. Because nothing irreversible happens, people can move faster: a mistake costs a rerun, not a corrupted database.</p>
+
+  <p class="book-ref">In the book: Chapter 10, "Reduce-Side Joins and Grouping", "Map-Side Joins", and "The Output of Batch Workflows" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch10-joins.js"></script>
+</body>
+</html>
