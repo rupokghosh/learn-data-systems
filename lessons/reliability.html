@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reliability · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body data-lesson="reliability">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Reliability: when things go wrong</h1>
+  </header>
+
+  <p>A reliable system keeps doing what users expect, even when parts of it break. Parts will break, so the goal is not zero faults. It is making sure faults do not reach the user.</p>
+
+  <h2>A fault is not a failure</h2>
+  <p>A fault<span class="sidenote"><em>fault:</em> One component deviating from its spec: a dead disk, a crashed process, a slow network link.</span> is one part of the system misbehaving. A failure<span class="sidenote"><em>failure:</em> The system as a whole stops providing the service users expect.</span> is when the whole system stops working for its users. A <strong>fault-tolerant</strong> system stops faults from turning into failures.</p>
+  <p>You cannot prevent every fault, so good teams practise on them. Some even crash their own servers on purpose, at random, to prove the system copes.</p>
+
+  <h2>Hardware faults: rare per machine, constant at scale</h2>
+  <figure class="widget" id="disks">
+    <p class="widget-title">How often does a disk die?</p>
+    <p class="widget-sub">Set the size of your fleet and how long an average disk lasts, then run a year.</p>
+    <div class="controls">
+      <div class="control"><label for="n-disks">Number of disks <output></output></label><input id="n-disks" type="range" min="1" max="5" step="0.05" value="4"></div>
+      <div class="control"><label for="mttf">Average disk lifetime <output></output></label><input id="mttf" type="range" min="5" max="50" step="1" value="30"></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Failures per day</div><div class="stat-value" data-out="day"></div></div>
+      <div class="stat"><div class="stat-label">Per year</div><div class="stat-value" data-out="year"></div></div>
+      <div class="stat"><div class="stat-label">One dies every</div><div class="stat-value" data-out="every" style="font-size:1.05rem"></div></div>
+    </div>
+    <div class="btn-row" style="margin-top:16px;align-items:center"><button class="btn primary" data-run>Simulate one year</button><span class="note" data-out="sim" style="margin:0"></span></div>
+    <div class="disk-grid" aria-hidden="true"></div>
+    <p class="note" data-out="cell"></p>
+  </figure>
+  <p>Rare events become routine at scale. The answer is <strong>redundancy</strong>: spare disks, duplicate power supplies, and copies of the data on several machines, so one dead part is a non-event.</p>
+
+  <h2>Software faults: fewer, but they strike everywhere at once</h2>
+  <p>Hardware faults are mostly independent: one disk dying does not make its neighbour more likely to die. Software bugs are different. The same bug runs on every machine, so one bad input or one odd date can take them all down together. A slow service can also make its callers retry, which piles on more load, which makes it slower: a <strong>cascading failure</strong>.</p>
+
+  <figure class="widget" id="corr">
+    <p class="widget-title">Do more copies always help?</p>
+    <p class="widget-sub">Compare how often you lose every copy of your data when faults are independent and when they are correlated.</p>
+    <div class="controls">
+      <div class="control"><label for="p-fail">Chance one machine fails today <output></output></label><input id="p-fail" type="range" min="-4" max="-2" step="0.05" value="-3"></div>
+      <div class="control"><label for="replicas">Copies (replicas) <output></output></label><input id="replicas" type="range" min="1" max="5" step="1" value="3"></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Independent faults: all copies lost once every</div><div class="stat-value" data-out="indep" style="font-size:1.05rem"></div></div>
+      <div class="stat"><div class="stat-label">Same bug on every copy: all lost once every</div><div class="stat-value" data-out="corr" style="font-size:1.05rem"></div></div>
+    </div>
+    <div class="verdict"></div>
+  </figure>
+
+  <h2>Human faults: the biggest source of outages</h2>
+  <p>People design, configure, and operate these systems, and people make mistakes. Configuration changes are behind a large share of real outages. You cannot train mistakes away, so make them cheap:</p>
+  <ul>
+    <li>Design APIs and tools that make the right thing easy and the wrong thing hard.</li>
+    <li>Give people a realistic sandbox to experiment in, away from real users.</li>
+    <li>Make rollback fast, and roll out changes to a few machines first.</li>
+    <li>Monitor everything, so you notice problems early.</li>
+  </ul>
+
+
+  <p>Reliability is not only a concern for banks and aircraft. A shop that goes down loses sales, and a photo app that loses someone's family pictures loses their trust forever. Cutting corners on reliability should be a conscious decision, not an accident.</p>
+
+  <p class="book-ref">In the book: Chapter 1, "Reliability" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/disks.js"></script>
+</body>
+</html>

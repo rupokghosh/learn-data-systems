@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Describing load · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body data-lesson="describing-load">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Describing load: the timeline problem</h1>
+  </header>
+
+  <p>"Will it scale?" means nothing until you say <em>which</em> load is growing. The first step is to describe today's load with a few numbers, called <strong>load parameters</strong>.</p>
+
+  <h2>Pick the numbers that matter</h2>
+  <p>Which load parameters matter depends on the system: requests per second for a web server, the ratio of reads to writes for a database, the number of people online at once for a chat app, or the hit rate of a cache. Sometimes the average case is what hurts. Often it is a handful of extreme cases.</p>
+
+  <h2>A worked example: the home timeline</h2>
+  <p>Imagine a social network. People do two main things: <strong>post</strong> a message to their followers, and <strong>read their timeline</strong>, the recent posts from everyone they follow. Reads outnumber posts by a wide margin. There are two basic ways to build it:</p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 220" role="img" aria-label="Two designs. Assemble on read: the reader fetches posts from each followed account. Deliver on write: the author's post is copied into each follower's timeline.">
+      <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink-3)"/></marker></defs>
+      <text x="0" y="16" style="fill:var(--ink);font:600 14px var(--sans)">A. Assemble on read</text>
+      <text x="0" y="34" style="fill:var(--ink-3);font-size:12px">Posting is cheap. Reading does the work.</text>
+      <g class="dg-node active"><rect x="0" y="100" width="90" height="44" rx="8"/><text x="14" y="127">Reader</text></g>
+      <g class="dg-node"><rect x="190" y="52" width="110" height="30" rx="6"/><text x="200" y="72" class="sub">Alice's posts</text></g>
+      <g class="dg-node"><rect x="190" y="92" width="110" height="30" rx="6"/><text x="200" y="112" class="sub">Bob's posts</text></g>
+      <g class="dg-node"><rect x="190" y="132" width="110" height="30" rx="6"/><text x="200" y="152" class="sub">Chen's posts</text></g>
+      <g class="dg-node"><rect x="190" y="172" width="110" height="30" rx="6"/><text x="200" y="192" class="sub">Dana's posts</text></g>
+      <g style="stroke:var(--ink-3);stroke-width:1.5" marker-end="url(#arr)">
+        <line x1="92" y1="116" x2="186" y2="67" marker-end="url(#arr)"/><line x1="92" y1="120" x2="186" y2="107" marker-end="url(#arr)"/>
+        <line x1="92" y1="126" x2="186" y2="147" marker-end="url(#arr)"/><line x1="92" y1="130" x2="186" y2="187" marker-end="url(#arr)"/>
+      </g>
+      <text x="96" y="210" style="fill:var(--ink-3);font-size:11px">one read = one lookup per account you follow</text>
+
+      <text x="350" y="16" style="fill:var(--ink);font:600 14px var(--sans)">B. Deliver on write</text>
+      <text x="350" y="34" style="fill:var(--ink-3);font-size:12px">Posting does the work. Reading is cheap.</text>
+      <g class="dg-node active"><rect x="350" y="100" width="90" height="44" rx="8"/><text x="364" y="127">Author</text></g>
+      <g class="dg-node"><rect x="530" y="52" width="110" height="30" rx="6"/><text x="540" y="72" class="sub">Follower 1 inbox</text></g>
+      <g class="dg-node"><rect x="530" y="92" width="110" height="30" rx="6"/><text x="540" y="112" class="sub">Follower 2 inbox</text></g>
+      <g class="dg-node"><rect x="530" y="132" width="110" height="30" rx="6"/><text x="540" y="152" class="sub">Follower 3 inbox</text></g>
+      <g class="dg-node"><rect x="530" y="172" width="110" height="30" rx="6"/><text x="540" y="192" class="sub">Follower 4 inbox</text></g>
+      <g style="stroke:var(--accent);stroke-width:1.5">
+        <line x1="442" y1="116" x2="526" y2="67" marker-end="url(#arr)"/><line x1="442" y1="120" x2="526" y2="107" marker-end="url(#arr)"/>
+        <line x1="442" y1="126" x2="526" y2="147" marker-end="url(#arr)"/><line x1="442" y1="130" x2="526" y2="187" marker-end="url(#arr)"/>
+      </g>
+      <text x="446" y="210" style="fill:var(--ink-3);font-size:11px">one post = one write per follower</text>
+    </svg>
+    </div>
+  </figure>
+
+  <p>The defaults below describe a typical day. Deliver-on-write wins easily, because reads are so much more common than posts. Now drag the celebrity slider.</p>
+
+  <figure class="widget" id="fanout">
+    <p class="widget-title">Fan-out simulator</p>
+    <p class="widget-sub">Total operations per second for each design (log scale). The shortest bar wins.</p>
+    <div class="controls">
+      <div class="control"><label for="posts">Posts <output></output></label><input id="posts" type="range" min="1000" max="20000" step="500" value="5000"></div>
+      <div class="control"><label for="reads">Timeline reads <output></output></label><input id="reads" type="range" min="4" max="6" step="0.05" value="5.477"></div>
+      <div class="control"><label for="followers">Average followers <output></output></label><input id="followers" type="range" min="1" max="3" step="0.05" value="2.3"></div>
+      <div class="control"><label for="celeb">Celebrity posts (20M followers each) <output></output></label><input id="celeb" type="range" min="0" max="20" step="1" value="0"></div>
+    </div>
+    <div class="chart"></div>
+    <div class="table-wrap"><table class="tradeoffs" style="margin:8px 0 0">
+      <tr><th>Design</th><th>Writes per second</th><th>Reads per second</th></tr>
+      <tr><td>Assemble on read</td><td data-row="pull" data-col="w"></td><td data-row="pull" data-col="r"></td></tr>
+      <tr><td>Deliver on write</td><td data-row="push" data-col="w"></td><td data-row="push" data-col="r"></td></tr>
+      <tr><td>Hybrid: deliver for most, assemble for celebrities</td><td data-row="hybrid" data-col="w"></td><td data-row="hybrid" data-col="r"></td></tr>
+    </table></div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>For this system, a key load parameter is the <strong>distribution</strong> of followers per user, not just the average. A few accounts with huge followings decide which design works. Real social networks use the hybrid: deliver most posts on write, and merge in celebrity posts at read time.</p>
+
+  <p class="book-ref">In the book: Chapter 1, "Describing Load" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/fanout.js"></script>
+</body>
+</html>

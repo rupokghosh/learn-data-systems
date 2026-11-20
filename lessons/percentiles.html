@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Percentiles · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body data-lesson="percentiles">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Describing performance: percentiles</h1>
+  </header>
+
+  <p>Once you know your load, ask what happens to performance as it grows. For an online service the number that matters most is response time, and response time is not one number. It is a distribution.</p>
+
+  <h2>Two ways to measure</h2>
+  <p>A batch job cares about <strong>throughput</strong>: how many records it gets through per second. An online service cares about response time<span class="sidenote"><em>response time:</em> What the client sees: the time from sending a request to getting the answer, including network and queueing delays.</span>. People often say "latency" for this, but strictly, latency is only the time a request spends waiting to be handled.</p>
+  <p>Send the same request a thousand times and you get a thousand different answers. A background task, a lost network packet, a garbage-collection pause, or a disk read can make any single request slow. So look at the whole shape.</p>
+
+  <p>Below, most requests take about 45 ms, but a few hit a slow path. Drag the slider to the right: the mean drifts away from the median, because a few slow requests drag the mean up while the median barely moves.</p>
+
+  <figure class="widget" id="latency">
+    <p class="widget-title">1,000 requests to one service</p>
+    <p class="widget-sub">Each bar counts requests in a response-time range. Orange bars are the slowest 5%. Both axes are stretched so rare slow requests stay visible.</p>
+    <div class="controls">
+      <div class="control"><label for="slow-rate">Requests that hit a slow path <output></output></label><input id="slow-rate" type="range" min="0" max="10" step="0.5" value="2"></div>
+      <div class="control" style="display:flex;align-items:end"><button class="btn" data-resample>Generate new requests</button></div>
+    </div>
+    <div class="chart"></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Mean</div><div class="stat-value" data-out="mean"></div></div>
+      <div class="stat"><div class="stat-label" style="color:var(--accent)">p50 (median)</div><div class="stat-value" data-out="p50"></div></div>
+      <div class="stat"><div class="stat-label" style="color:var(--orange)">p95</div><div class="stat-value" data-out="p95"></div></div>
+      <div class="stat"><div class="stat-label" style="color:var(--red)">p99</div><div class="stat-value" data-out="p99"></div></div>
+      <div class="stat"><div class="stat-label" style="color:var(--purple)">p99.9</div><div class="stat-value" data-out="p999"></div></div>
+    </div>
+  </figure>
+
+  <p>Use <strong>percentiles</strong>, not the mean. The median (p50) is the typical experience: half of requests are faster. The <strong>tail</strong> (p95, p99, p99.9) tells you how bad it gets for the unlucky ones. If p99 is 1.5 s, then 1 in 100 requests takes at least that long.</p>
+  <p>The tail matters because the slowest requests often come from your most valuable users: the ones with the most data, the biggest carts, the longest histories. Teams write targets in percentiles, for example: "median under 200 ms and p99 under 1 s".</p>
+
+  <h2>Tail latency amplification</h2>
+  <p>One page load often calls many backend services in parallel, and the page is only as fast as the slowest call. So rare slowness in each backend becomes common slowness for users.</p>
+
+  <figure class="widget" id="tail">
+    <p class="widget-title">One page, many backend calls</p>
+    <p class="widget-sub">The chance a user waits on at least one slow call: 1 − (1 − p)<sup>n</sup>.</p>
+    <div class="controls">
+      <div class="control"><label for="calls">Backend calls per page (n) <output></output></label><input id="calls" type="range" min="1" max="100" step="1" value="10"></div>
+      <div class="control"><label for="p-slow">Each call is slow with chance (p) <output></output></label><input id="p-slow" type="range" min="0.5" max="10" step="0.5" value="1"></div>
+    </div>
+    <div class="stats" style="margin:0 0 12px"><div class="stat"><div class="stat-label">Chance the page is slow</div><div class="stat-value" data-out="chance"></div></div></div>
+    <div class="chart"></div>
+    <div class="btn-row" style="margin:14px 0 8px"><button class="btn primary" data-send>Load the page once</button></div>
+    <div class="calls" aria-hidden="true"></div>
+    <div data-out="result"></div>
+  </figure>
+
+  <p>One practical trap: percentiles do not average. You cannot take the p99 of each server and average them. To combine servers or time windows, merge the underlying histograms and compute the percentile again.</p>
+
+  <p class="book-ref">In the book: Chapter 1, "Describing Performance" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/latency.js"></script>
+</body>
+</html>

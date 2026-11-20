@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coping with load · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body data-lesson="coping-with-load">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Coping with load</h1>
+  </header>
+
+  <p>You can now describe load and measure performance. The next question: how do you keep performance good as load keeps growing?</p>
+
+  <h2>Busy servers get slow suddenly</h2>
+  <p>Requests do not arrive evenly. They come at random, so sometimes several land at once and have to wait in a queue. The busier a server is, the longer each queue takes to drain. As utilization approaches 100%, waiting time does not grow steadily. It shoots up.</p>
+  <p>A few slow requests make it worse: everything queued behind them waits too. This is called head-of-line blocking<span class="sidenote"><em>head-of-line blocking:</em> Fast requests stuck waiting behind a slow one at the front of the queue.</span>.</p>
+
+  <p>In a simple queueing model, waiting time grows like 1 ÷ (1 − utilization). Going from 50% to 90% busy makes the average request five times slower, even though the load did not even double.</p>
+
+  <figure class="widget" id="queue">
+    <p class="widget-title">Utilization vs response time</p>
+    <p class="widget-sub">Each server handles 200 requests per second. Traffic is spread evenly across servers.</p>
+    <div class="controls">
+      <div class="control"><label for="rate">Incoming traffic <output></output></label><input id="rate" type="range" min="50" max="1700" step="10" value="520"></div>
+      <div class="control"><label for="servers">Servers <output></output></label><input id="servers" type="range" min="1" max="8" step="1" value="4"></div>
+    </div>
+    <div class="chart"></div>
+    <div class="legend"><span><i style="background:var(--accent)"></i>Mean response time</span><span><i style="background:var(--red)"></i>p99 response time</span><span><i style="background:var(--red-soft);height:10px"></i>Danger zone (above 85%)</span></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Utilization</div><div class="stat-value" data-out="util"></div></div>
+      <div class="stat"><div class="stat-label">Capacity</div><div class="stat-value" data-out="cap"></div></div>
+      <div class="stat"><div class="stat-label">Mean</div><div class="stat-value" data-out="mean"></div></div>
+      <div class="stat"><div class="stat-label">p99</div><div class="stat-value" data-out="p99"></div></div>
+    </div>
+    <div class="verdict"></div>
+  </figure>
+
+  <h2>Scaling up or scaling out</h2>
+  <p>When one machine is not enough, you have two broad options.</p>
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 600 170" role="img" aria-label="Scaling up means one bigger machine. Scaling out means many smaller machines.">
+      <text x="0" y="16" style="fill:var(--ink);font:600 14px var(--sans)">Scale up (vertical)</text>
+      <g class="dg-node"><rect x="0" y="32" width="70" height="56" rx="8"/></g>
+      <text x="85" y="66" style="fill:var(--ink-3);font-size:20px">→</text>
+      <g class="dg-node active"><rect x="115" y="32" width="150" height="120" rx="10"/><text x="130" y="96">One bigger machine</text></g>
+      <text x="320" y="16" style="fill:var(--ink);font:600 14px var(--sans)">Scale out (horizontal)</text>
+      <g class="dg-node"><rect x="320" y="32" width="70" height="56" rx="8"/></g>
+      <text x="405" y="66" style="fill:var(--ink-3);font-size:20px">→</text>
+      <g class="dg-node active"><rect x="435" y="32" width="70" height="56" rx="8"/></g>
+      <g class="dg-node active"><rect x="515" y="32" width="70" height="56" rx="8"/></g>
+      <g class="dg-node active"><rect x="435" y="96" width="70" height="56" rx="8"/></g>
+      <g class="dg-node active"><rect x="515" y="96" width="70" height="56" rx="8"/></g>
+    </svg>
+    </div>
+  </figure>
+  <div class="table-wrap"><table class="tradeoffs">
+    <tr><th></th><th>Scale up</th><th>Scale out</th></tr>
+    <tr><td><strong>How</strong></td><td>Buy a more powerful machine.</td><td>Spread the load across many machines that share nothing.</td></tr>
+    <tr><td><strong>You gain</strong></td><td>Simplicity. No distributed-systems problems.</td><td>No hard ceiling, and the system survives one machine dying.</td></tr>
+    <tr><td><strong>You pay</strong></td><td>Cost rises steeply at the top end, there is a ceiling, and one machine is one point of failure.</td><td>Much more complexity, especially for data that lives on the machines.</td></tr>
+  </table></div>
+  <p>Stateless services, like web servers, are easy to scale out: add copies behind a load balancer. Stateful systems, like databases, are much harder, because the data itself has to be split and copied. That is why many teams keep their database on one machine until they truly must distribute it. Later chapters on replication and partitioning are all about doing that well.</p>
+  <p>Some systems are <strong>elastic</strong>: they add machines automatically when load rises. Others are scaled by hand. Elastic is useful when load is unpredictable; manual is simpler and has fewer surprises.</p>
+
+  <p>There is no general-purpose, magic scaling recipe. An architecture that scales well is built on assumptions about which operations will be common and which rare: your load parameters. Get those wrong and the scaling effort is wasted.</p>
+
+  <p class="book-ref">In the book: Chapter 1, "Approaches for Coping with Load" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/queue.js"></script>
+</body>
+</html>

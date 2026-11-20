@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maintainability · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body data-lesson="maintainability">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Maintainability</h1>
+  </header>
+
+  <p>Most of the cost of software is not in building it. It is in keeping it running, fixing it, and changing it for years afterwards, usually by people who did not write it.</p>
+
+  <p>Three design principles help keep a system workable over its lifetime.</p>
+
+  <h2>1. Operability: make life easy for operations</h2>
+  <p>Good operations can often work around bad software, but not the other way round. Help the people running the system with clear monitoring, predictable behaviour, good documentation, automation that can be overridden by hand, sensible defaults, and no reliance on any single machine.</p>
+
+  <h2>2. Simplicity: manage complexity</h2>
+  <p>Large projects tend to sink into a "big ball of mud": tangled dependencies, special cases, inconsistent names. Some complexity is <strong>essential</strong> because the problem itself is hard. Much of it is <strong>accidental</strong>: it comes only from how the system was built. The best tool for removing accidental complexity is a good <strong>abstraction</strong>, a clean interface that hides messy details.</p>
+
+  <figure class="widget" id="abstraction">
+    <p class="widget-title">What one line of SQL hides</p>
+    <p class="widget-sub">You write a single query. Open the abstraction to see what the database does for you.</p>
+    <pre class="code">UPDATE accounts SET balance = balance - 50 WHERE id = 42;</pre>
+    <button class="btn primary" data-peek aria-expanded="false">Look under the hood</button>
+    <ol class="steps peek" hidden>
+      <li>Parse the query and choose an execution plan.</li>
+      <li>Find row 42 using an index, without scanning the whole table.</li>
+      <li>Lock the row so a concurrent update cannot overwrite this one.</li>
+      <li>Write the change to a log first, so it survives a crash halfway through.</li>
+      <li>Update the data page in memory and later flush it to disk.</li>
+      <li>Keep the old version so other readers still see a consistent snapshot.</li>
+      <li>Copy the change to replica machines, if there are any.</li>
+    </ol>
+    <p class="note peek" hidden>Every item on this list is a topic in a later chapter. A good abstraction lets you ignore all of it most of the time.</p>
+  </figure>
+
+  <h2>3. Evolvability: make change easy</h2>
+  <p>Requirements always change: new features, new regulations, new scale, new platforms. A simple, well-abstracted system is much easier to change than a tangled one. Evolvability is really simplicity and good abstractions, seen over time.</p>
+
+
+  <p class="book-ref">In the book: Chapter 1, "Maintainability" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module">
+  const btn = document.querySelector("[data-peek]");
+  btn.addEventListener("click", () => {
+    const open = btn.getAttribute("aria-expanded") !== "true";
+    btn.setAttribute("aria-expanded", String(open));
+    btn.textContent = open ? "Hide the details" : "Look under the hood";
+    document.querySelectorAll(".peek").forEach((el) => (el.hidden = !open));
+  });
+</script>
+</body>
+</html>
