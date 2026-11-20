@@ -336,7 +336,9 @@ export function mountLab(fig, cfg) {
     else parts.push("<strong>Not serializable</strong>: no serial order of the committed transactions produces these reads and this final state.");
     let inv = null;
     if (st.sc.invariant) { inv = st.sc.invariant.ok(ctx); parts.push(esc(st.sc.invariant.text(ctx, inv))); }
-    const killed = db.txns.filter((t) => t.status === "aborted" && t.kind !== "app");
+    const dup = db.txns.filter((t) => t.status === "aborted" && t.kind === "unique");
+    if (dup.length) parts.push(`The database rejected ${dup.map((t) => esc(t.name)).join(" and ")} with a duplicate key error. That is a constraint violation, not a passing conflict, so the application should report it to the user rather than retry.`);
+    const killed = db.txns.filter((t) => t.status === "aborted" && t.kind !== "app" && t.kind !== "unique");
     if (killed.length) parts.push(`The database aborted ${killed.map((t) => esc(t.name)).join(" and ")}; the application should retry ${killed.length > 1 ? "them" : "it"}.`);
     verdict.classList.add(sc.ok && inv !== false ? "good" : "bad");
     verdict.innerHTML = parts.join(" ");

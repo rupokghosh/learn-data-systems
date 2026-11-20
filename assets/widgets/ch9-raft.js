@@ -19,6 +19,11 @@ const pos = Array.from({ length: 5 }, (_, i) => {
 
 // ---------- static drawing ----------
 svg.textContent = "";
+// On phones, crop the empty margins around the ring so all five nodes fit without scrolling.
+const narrow = matchMedia("(max-width: 560px)");
+const fitView = () => svg.setAttribute("viewBox", narrow.matches ? "148 2 344 314" : "0 0 640 316");
+narrow.addEventListener("change", fitView);
+fitView();
 const wall = el("line", { class: "rf-wall", opacity: 0 }, svg);
 const msgLayer = el("g", {}, svg);
 const nodes = pos.map(([x, y], i) => {

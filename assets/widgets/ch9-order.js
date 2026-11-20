@@ -126,8 +126,10 @@ import { Broadcast } from "../engines/ch9-tob.js";
       : '<span class="note">No events yet.</span>';
 
     const ok = clockConditionHolds(inf);
-    verdict.className = "verdict " + (ok ? "good" : "bad");
-    verdict.textContent = ok
+    verdict.className = "verdict " + (!events.length ? "" : ok ? "good" : "bad");
+    verdict.textContent = !events.length
+      ? "Nothing to order yet. Click a node's line to add an event, or press Example."
+      : ok
       ? `${events.length} events, ${messages.length} message${messages.length === 1 ? "" : "s"}. Every arrow, and every step along a line, goes from a smaller timestamp to a larger one. So sorting by (timestamp, node) gives one total order that never puts an effect before its cause.`
       : "The clock condition is violated.";
 
@@ -220,8 +222,10 @@ import { Broadcast } from "../engines/ch9-tob.js";
   function pos(f) {
     const p = Math.max(0, Math.min(1, (b.now - f.sentAt) / (f.arriveAt - f.sentAt)));
     const e = p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2;
+    // Pills are 60 wide and centred on this point, so stop half a pill short of each box.
     const x1 = SEQX + SEQW, y1 = SEQY + SEQH / 2, x2 = RX, y2 = RY[f.replica] + RH / 2;
-    return [x1 + (x2 - x1) * e, y1 + (y2 - y1) * e];
+    const px = x1 + 30 + (x2 - x1 - 60) * e;
+    return [px, y1 + (y2 - y1) * ((px - x1) / (x2 - x1))];
   }
 
   function render() {

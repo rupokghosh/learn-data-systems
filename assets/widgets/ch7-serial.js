@@ -118,7 +118,7 @@ mountLab(document.getElementById("lab-serial"), {
       const P = PANELS[p];
       const w = box.clientWidth;
       if (!w) return;
-      const H = 170, top = 10, bottom = 26, left = 34, right = 8;
+      const H = 170, top = 10, bottom = 26, left = 40, right = 14;
       const x = logScale([2, 128], [left, w - right]);
       const vals = ["2pl", "ssi"].flatMap((l) => res[l].map((r) => P.get(r, l)));
       const ymax = P.max || Math.max(...vals) * 1.1 || 1;

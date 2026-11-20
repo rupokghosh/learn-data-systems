@@ -54,7 +54,7 @@ import { check, pointsFor, PRESETS } from "../engines/ch9-lin.js";
     start = Math.max(gap[0], end - 16);
     const writes = ops.filter((o) => o.type === "w");
     let value;
-    if (mode === "w") value = writes.length ? (Math.max(...writes.map((o) => o.value)) % 5) + 1 : 1;
+    if (mode === "w") value = writes.length ? (writes[writes.length - 1].value % 5) + 1 : 1;
     else {
       const before = writes.filter((o) => o.start <= t).sort((a, b) => b.start - a.start)[0];
       value = before ? before.value : 0;
@@ -97,7 +97,7 @@ import { check, pointsFor, PRESETS } from "../engines/ch9-lin.js";
       el("rect", { class: "bar", x: x(o.start), y: y - BAR / 2, width: Math.max(4, x(o.end) - x(o.start)), height: BAR, rx: 5 }, g);
       el("rect", { class: "grip", x: x(o.start) + 2, y: y - 6, width: 2, height: 12, rx: 1 }, g);
       el("rect", { class: "grip", x: x(o.end) - 4, y: y - 6, width: 2, height: 12, rx: 1 }, g);
-      const tx = el("text", { x: (x(o.start) + x(o.end)) / 2, y: y + 4, "text-anchor": "middle" }, g);
+      const tx = el("text", { x: (x(o.start) + x(o.end)) / 2, y: y - 1, "text-anchor": "middle" }, g);
       tx.textContent = o.type === "w" ? `write ${o.value}` : `read ${o.value}`;
     }
 
@@ -105,11 +105,13 @@ import { check, pointsFor, PRESETS } from "../engines/ch9-lin.js";
     const order = res.ok ? res.order : res.stuck.placed;
     if (order.length) {
       const pts = res.ok ? res.points : pointsFor(ops, order);
-      const coords = order.map((i) => [x(pts[i]), LY[ops[i].client]]);
+      // Points sit in the lower half of each bar so they do not cover its label.
+      const DOTY = 8;
+      const coords = order.map((i) => [x(pts[i]), LY[ops[i].client] + DOTY]);
       el("path", { class: "lin-path", d: "M" + coords.map((p) => p.join(",")).join(" L"), opacity: res.ok ? 0.65 : 0.3 }, svg);
       coords.forEach(([px, py], k) => {
-        el("circle", { cx: px, cy: py, r: 4.5, class: "lin-point", opacity: res.ok ? 1 : 0.35 }, svg);
-        const n = el("text", { x: px, y: py - BAR / 2 - 5, "text-anchor": "middle", class: "lin-num", opacity: res.ok ? 1 : 0.5 }, svg);
+        el("circle", { cx: px, cy: py, r: 3.5, class: "lin-point", opacity: res.ok ? 1 : 0.35 }, svg);
+        const n = el("text", { x: px, y: py - DOTY - BAR / 2 - 5, "text-anchor": "middle", class: "lin-num", opacity: res.ok ? 1 : 0.5 }, svg);
         n.textContent = k + 1;
       });
     }
@@ -120,7 +122,7 @@ import { check, pointsFor, PRESETS } from "../engines/ch9-lin.js";
       orderOut.textContent = "";
     } else if (res.ok) {
       say("<strong>Linearizable.</strong> Each dot is a moment inside an operation where it could have taken effect. Follow the numbers: the register behaves like a single copy that changes at those instants.", "good");
-      orderOut.textContent = res.order.map((i, k) => `${k + 1}. ${label(ops[i])}`).join("   ");
+      orderOut.textContent = res.order.map((i, k) => `${k + 1}. ${label(ops[i])}`).join(" · ");
     } else {
       const s = res.stuck;
       const reads = s.blocked.map((i) => `${NAMES[ops[i].client]} read ${ops[i].value}`).join(", ");

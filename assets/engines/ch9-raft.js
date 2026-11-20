@@ -160,7 +160,8 @@ export class Raft {
         if (!nd.log[idx - 1]) nd.log.push({ ...e });
       });
       const match = m.prevIndex + m.entries.length;
-      if (m.leaderCommit > nd.commit) this.setCommit(nd, Math.min(m.leaderCommit, match));
+      // A commit index never moves backwards, even if this message covers fewer entries.
+      if (m.leaderCommit > nd.commit) this.setCommit(nd, Math.max(nd.commit, Math.min(m.leaderCommit, match)));
       this.send(nd.id, m.from, { type: "AppendReply", term: nd.term, success: true, match });
     } else if (m.type === "AppendReply") {
       if (nd.role !== "leader" || m.term !== nd.term) return;

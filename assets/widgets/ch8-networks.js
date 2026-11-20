@@ -35,8 +35,9 @@ import { spaceTime, makeSweep } from "./ch8-spacetime.js";
 
   function showFacts() {
     const late = trace.events.find((e) => e.kind === "late");
-    out("reached").textContent = trace.fate === "req-lost" ? "no" : trace.fate === "server-crash" ? "yes, but it was down" : "yes";
-    out("work").textContent = trace.executed ? "yes" : "no";
+    // In the client's view the server side is hidden, so these two are unknowable.
+    out("reached").textContent = hide.checked ? "cannot tell" : trace.fate === "req-lost" ? "no" : trace.fate === "server-crash" ? "yes, but it was down" : "yes";
+    out("work").textContent = hide.checked ? "cannot tell" : trace.executed ? "yes" : "no";
     out("before").textContent = "nothing";
     out("after").textContent = late ? `a late answer at ${late.t.toFixed(1)} s` : "nothing, ever";
     verdict.className = "verdict";
@@ -85,7 +86,7 @@ import { spaceTime, makeSweep } from "./ch8-spacetime.js";
       cls = "bad";
       text = `False alarms are rare, but a node that really crashed goes unnoticed for about ${ms(res.detectMean * 1000)} on average. Every request routed to it in that window waits and fails.`;
     } else if (res.falsePerHour === 0) {
-      text = `No false alarms in this sample, and a crash is noticed in about ${ms(res.detectMean * 1000)}. Raise the congestion and see whether that still holds.`;
+      text = `No false alarms in this sample, and a crash is noticed in about ${ms(res.detectMean * 1000)}. Raise the network load and see whether that still holds.`;
     } else {
       text = `A workable middle: roughly ${res.falsePerHour >= 10 ? fmt(res.falsePerHour, 0) : res.falsePerHour.toFixed(1)} false alarms an hour against about ${ms(res.detectMean * 1000)} to notice a real crash. Neither number can reach zero without making the other worse.`;
     }

@@ -74,7 +74,12 @@ function render() {
   } else if (tx.parts.some((p) => p.state === "committed") && doubt.length) {
     verdict.className = "verdict bad";
     verdict.textContent = `Some participants have committed while ${names(doubt)} still ${doubt.length > 1 ? "wait" : "waits"}. The only allowed outcome now is commit; it arrives when the message gets through.`;
-  } else { verdict.className = "verdict"; verdict.textContent = "The transaction is in progress."; }
+  } else {
+    // Next step is disabled while the protocol waits, so say what it is waiting for.
+    const wait = tx.agenda();
+    verdict.className = "verdict";
+    verdict.textContent = wait.kind === "wait" ? `${wait.text} Restart the crashed node to let the protocol continue.` : "The transaction is in progress.";
+  }
 
   // controls
   root.querySelectorAll("[data-node]").forEach((btn) => {

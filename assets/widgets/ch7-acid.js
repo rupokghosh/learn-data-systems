@@ -83,7 +83,7 @@ const h = (tag, attrs = {}, html) => {
       const pending = [...vs].reverse().find((v) => !v.aborted && db.committedSeq(v.by) === null);
       const rolled = [...vs].reverse().find((v) => v.aborted);
       const chip = (val, meta, cls) => { const c = h("span", { class: "ver " + cls }); c.appendChild(h("span", { class: "val" }, val)); c.appendChild(h("span", { class: "meta" }, meta)); box.appendChild(c); };
-      chip(committed === null ? "no row" : committed, "committed", committed === null ? "old" : "");
+      chip(committed === null ? "no row" : committed, committed === null ? "" : "committed", committed === null ? "old" : "");
       if (pending) chip(pending.value, "uncommitted", "uncommitted");
       else if (rolled && crashed) chip(rolled.value, "undone by recovery", "aborted");
       rows.appendChild(box);
@@ -254,7 +254,7 @@ const h = (tag, attrs = {}, html) => {
     verdict.classList.add(ok ? "good" : "bad");
     const left = Object.keys(p).filter((k) => !destroyed(fail, lies).includes(k)).map((k) => ({ "L.mem": "the leader's memory", "L.disk": "the leader's disk", "R1.mem": "replica 1", "R2.mem": "replica 2 in datacentre B" }[k]));
     verdict.innerHTML = ok
-      ? `<strong>The order survived</strong>: a copy is still in ${left.join(" and ")}.`
+      ? `<strong>The order survived</strong>: a copy is still in ${left.length > 1 ? left.slice(0, -1).join(", ") + (left.length > 2 ? ", and " : " and ") + left.at(-1) : left[0]}.`
       : `<strong>The order is gone</strong>, although the client was told it was committed.${wait === "fsync" && lies && fail === "power" ? " The drive reported the fsync as done while the data sat in its volatile cache." : ""}`;
   }
   waitBtns.forEach((b) => b.addEventListener("click", () => { wait = b.dataset.wait; fail = null; render(); }));

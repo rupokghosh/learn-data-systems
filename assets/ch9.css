@@ -119,6 +119,8 @@
 .rf-node.down .role { fill: var(--red); opacity: 1; }
 .rf-timer { fill: none; stroke: var(--ink-4); stroke-width: 2.5; stroke-linecap: round; }
 .rf-wall { stroke: var(--red); stroke-width: 2; stroke-dasharray: 7 5; }
+/* On phones the ring is drawn from a cropped viewBox (see ch9-raft.js), so it fits without scrolling. */
+@media (max-width: 560px) { #raft .scroll-x > svg { min-width: 0; } }
 .rf-log { overflow-x: auto; margin-top: 8px; }
 .rf-log table { border-collapse: separate; border-spacing: 3px; font: 11px/1.2 var(--sans); }
 .rf-log th { font-weight: 500; color: var(--ink-3); text-align: left; padding: 0 6px 0 0; white-space: nowrap; }

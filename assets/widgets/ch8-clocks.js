@@ -140,14 +140,15 @@ const signedMs = (s) => `${s >= 0 ? "+" : "−"}${Math.round(Math.abs(s) * 1000)
   function say() {
     const w1 = trace.storageLog.find((w) => w.from === "n1");
     const late = (w1.t - trace.leaseEnd).toFixed(1);
+    const renewed = trace.msgs.some((m) => m.label === "renewed");
     if (trace.outcome === "safe") {
       verdict.className = "verdict good";
       verdict.textContent = pause === 0
         ? "No pause: node-1 writes with time to spare and renews its lease. This is the case the code was written for."
-        : `The pause ended in time. node-1's write landed before the lease expired, and it renewed. Push the pause past ${(trace.leaseEnd - trace.pauseAt - 0.2).toFixed(1)} s.`;
+        : `The pause ended in time. node-1's write landed before the lease expired${renewed ? ", and it renewed" : ". Its renewal came too late, so it stepped aside and node-2 took over cleanly"}. Push the pause past ${(trace.leaseEnd - trace.pauseAt - 0.2).toFixed(1)} s.`;
     } else if (trace.outcome === "overlap") {
       verdict.className = "verdict bad";
-      verdict.textContent = `node-1's write arrived ${late} s after its lease had expired, while node-2 was already taking over. For a moment two nodes acted as leader.`;
+      verdict.textContent = `node-1's write arrived ${+late ? `${late} s after` : "just as"} its lease ${+late ? "had expired" : "expired"}, while node-2 was already taking over. For a moment two nodes acted as leader.`;
     } else {
       verdict.className = "verdict bad";
       verdict.textContent = `node-2 became leader and wrote plan B. Then node-1 woke up, still sure of the lease check it made before the pause, and overwrote it with plan A, ${late} s after its lease had expired. Storage now holds stale data.`;

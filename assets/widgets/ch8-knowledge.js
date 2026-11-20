@@ -26,7 +26,7 @@ import { spaceTime, makeSweep } from "./ch8-spacetime.js";
     out("accepted").textContent = acc.map((h) => h.who).join(", then ") || "none";
     out("rejected").textContent = trace.history.filter((h) => !h.accepted).map((h) => h.who).join(", ") || "none";
     const texts = {
-      safe: ["good", "client 1 finished well inside its lease, so the lock did its job. Lengthen the pause until it outlives the lease."],
+      safe: ["good", "client 1 finished inside its lease, so the lock did its job. Lengthen the pause until it outlives the lease."],
       "late-but-ordered": ["", "client 1 wrote after its lease expired, but before client 2 did. The writes land in lock order, so nothing is lost this time. That was luck, not design."],
       corrupted: ["bad", "client 2 held the lock and saved its edit. Then client 1 woke up, still believing it held the lock, and overwrote that edit. Storage had no way to tell the two clients apart. Turn on fencing tokens."],
       fenced: ["good", "client 1 woke up and sent its write with token 33. Storage had already accepted token 34, so it refused the stale write and told client 1. The paused client could not do harm, however long it slept."],
