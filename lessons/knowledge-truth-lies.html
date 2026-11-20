@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Knowledge, truth, and lies · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch8.css">
+</head>
+<body data-lesson="knowledge-truth-lies">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Knowledge, truth, and lies</h1>
+  </header>
+
+  <p>A node in a distributed system has no shared memory to inspect and no reliable clock to consult. Everything it knows about the others arrives as messages that may be late, lost, or out of date. So the useful question is not "what is true?" but "what can a node safely conclude from the messages it has?" The answer turns out to be: less than it thinks, and very little about itself.</p>
+
+  <h2>The majority decides</h2>
+  <p>Picture a node whose outgoing network link has failed while its incoming link still works. It hears every heartbeat from its peers and believes the cluster is healthy. Its peers hear nothing from it and, after a timeout, declare it dead. Or picture a node that froze for fifteen seconds in a garbage collection pause: from its point of view no time passed at all, yet the rest of the cluster has already moved on without it. In both cases the node's own view of the situation is wrong, and it has no way to discover that by looking inward.</p>
+
+  <p>So distributed systems do not let any single node decide what is true. Decisions are made by a <strong>quorum</strong>, usually a majority of the nodes. If a majority declares a node dead, it is dead for all practical purposes, even if it is running perfectly well, and it must accept that verdict and step down. Majorities are used because any two of them share at least one node, so the cluster cannot reach two conflicting decisions at the same time.<span class="sidenote">With five nodes, any two groups of three overlap in at least one member. This is the arithmetic behind ZooKeeper, etcd, and the consensus algorithms in the next chapter.</span></p>
+
+  <h2>Leases, locks, and fencing tokens</h2>
+  <p>Many systems need exactly one of something: one leader for each partition, one holder of the lock on a file, one account per username. A node may be granted that role by the majority and then lose it without knowing. If it keeps acting on its old belief, the system now has two leaders. The previous lesson showed how this happens with a lease and a long pause. Here the same failure hits a lock that protects a file in a storage service.</p>
+
+  <figure class="widget" id="fencing">
+    <p class="widget-title">A paused lock holder comes back</p>
+    <p class="widget-sub">client 1 takes the lock, then freezes before it writes. Choose how long, and whether storage checks tokens.</p>
+    <div class="controls">
+      <div class="control"><label for="fence-pause">client 1 pause <output></output></label><input id="fence-pause" type="range" min="0" max="10" step="0.1" value="7.5"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn" data-fence aria-pressed="false">Fencing tokens</button>
+      <button class="btn primary" data-play>Play in time</button>
+    </div>
+    <div class="scroll-x"><svg class="ch8-st" role="img" aria-label="Space-time diagram: client 1, the lock service, client 2 and storage, with client 1's pause shown as a band"></svg></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">The file now holds</div><div class="stat-value sm" data-out="file"></div></div>
+      <div class="stat"><div class="stat-label">Writes accepted</div><div class="stat-value sm" data-out="accepted"></div></div>
+      <div class="stat"><div class="stat-label">Writes rejected</div><div class="stat-value sm" data-out="rejected"></div></div>
+    </div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>The fix is to stop trusting the client's belief and make the resource itself check. Every time the lock service grants the lock, it also hands out a <strong>fencing token</strong>: a number that is larger than every token it handed out before. The client must include its token with every write, and the storage service remembers the largest token it has accepted and refuses anything older. A client that slept through the loss of its lock now gets an error instead of silently destroying a newer write.</p>
+
+  <p>ZooKeeper provides suitable numbers for free: the transaction ID or the node version it assigns can serve as the token, since both only increase. The catch is that the storage service has to cooperate. If it cannot check tokens itself, you can sometimes get the same effect with a conditional write, such as a compare-and-set on a version number, or by putting the token into the object's name. Fencing protects against honest mistakes, such as a node that does not know it is out of date. It does nothing against a node that sends a fake token on purpose.</p>
+
+  <h2>Byzantine faults</h2>
+  <p>So far every node has been assumed to be honest: perhaps slow, perhaps confused, but never lying. A <strong>Byzantine fault</strong> is a node that sends arbitrary or deliberately misleading messages, such as claiming to have stored data it threw away or sending different answers to different peers. A system that keeps working correctly when some nodes behave like this is called <em>Byzantine fault-tolerant</em>, and most such protocols need more than two thirds of the nodes to be honest.</p>
+
+  <p>This matters in two kinds of setting. In aircraft and spacecraft, radiation can flip bits in memory and make a computer behave unpredictably, and the consequences of trusting it are severe. And when nodes belong to organizations that do not trust one another, as in cryptocurrencies and other blockchains, any participant might cheat. Inside one company's datacentre the situation is different. You run all the nodes, and a bug in your code would be present on every replica at once, so a Byzantine protocol would not save you from it. The cost of such protocols is rarely worth paying there.</p>
+
+  <p>Weak forms of lying are still worth guarding against. Network hardware and firmware bugs occasionally corrupt packets in ways that TCP and Ethernet checksums miss, so application-level checksums are cheap insurance. A public-facing service should validate every input: sizes, ranges, and formats, so that a malformed request cannot crash it. NTP clients query several servers and discard the ones that disagree wildly with the rest, so that one broken server cannot drag the clock away.</p>
+
+  <h2>System models and correctness</h2>
+  <p>To reason about algorithms that run on this kind of hardware, researchers write down a <strong>system model</strong>: the faults the algorithm must tolerate. There are two dimensions.</p>
+
+  <div class="table-wrap"><table class="tradeoffs">
+    <tr><th>Timing</th><th>What it assumes</th></tr>
+    <tr><td>Synchronous</td><td>Network delay, pauses, and clock error all have known upper bounds. Not realistic for ordinary systems.</td></tr>
+    <tr><td>Partially synchronous</td><td>The system behaves within bounds most of the time but can exceed them for unknown periods. The most realistic choice.</td></tr>
+    <tr><td>Asynchronous</td><td>No timing assumptions at all, not even a clock. Very restrictive, but some algorithms work within it.</td></tr>
+  </table></div>
+  <div class="table-wrap"><table class="tradeoffs">
+    <tr><th>Node faults</th><th>What it assumes</th></tr>
+    <tr><td>Crash-stop</td><td>A node that fails stops forever.</td></tr>
+    <tr><td>Crash-recovery</td><td>A node may crash and come back later. Data on stable storage survives, memory does not. The most useful model in practice.</td></tr>
+    <tr><td>Byzantine</td><td>A node may do anything, including lie.</td></tr>
+  </table></div>
+
+  <p>Within a model, an algorithm is correct if it satisfies stated properties. For the fencing token scheme they might be: no two grants get the same token (uniqueness), later grants get larger tokens (monotonic sequence), and a node that asks for a token and does not crash eventually gets one (availability). These properties come in two kinds. A <strong>safety</strong> property says nothing bad happens; if it is violated, you can point to the moment, and nothing afterwards can undo it. A <strong>liveness</strong> property says something good eventually happens; at any given moment it may not have happened yet, but it still could.</p>
+
+  <figure class="widget" id="props">
+    <p class="widget-title">Watching four runs unfold</p>
+    <p class="widget-sub">Drag to observe more of each run. Each run is checked against one property.</p>
+    <div class="controls">
+      <div class="control"><label for="props-t">Observed up to <output></output></label><input id="props-t" type="range" min="0" max="120" step="1" value="60"></div>
+    </div>
+    <div class="chart"></div>
+  </figure>
+
+  <p>The difference shapes how algorithms are designed. Practical systems require safety in every situation the model allows, even if every node crashes or the network is down for an hour, because a safety violation is permanent. Liveness is allowed to come with conditions: a request is answered eventually, provided a majority of nodes is up and the network recovers. In the run where the crashed node is never suspected, no prefix of the trace proves anything is wrong, and that is exactly why timeouts exist.</p>
+
+  <p>A model is a simplification, and reality breaks it at the edges. Crash-recovery assumes data on disk survives, but disks fail and firmware has bugs, and a node that comes back with an empty disk can break a quorum algorithm that was proven correct. Proofs still matter, because they show an algorithm is sound within its assumptions, and testing shows how often the assumptions hold. You need both.</p>
+
+  <p class="book-ref">In the book: Chapter 8, "Knowledge, Truth, and Lies" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch8-knowledge.js"></script>
+</body>
+</html>

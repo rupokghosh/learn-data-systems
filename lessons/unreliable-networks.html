@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Faults and unreliable networks · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch8.css">
+</head>
+<body data-lesson="unreliable-networks">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Faults and unreliable networks</h1>
+  </header>
+
+  <p>A program running on one computer fails in a tidy way. If the memory is corrupted or a disk controller misbehaves, the usual result is a crash, not a slightly wrong answer. Hardware and operating systems are designed like this on purpose: it is easier to reason about a machine that either works or stops than about one that works a little.</p>
+
+  <p>Spread the same program across several machines and that tidiness is gone. Some parts keep working while others are broken, and the broken parts do not announce themselves. This lesson is about the network, the first and most stubborn source of that uncertainty.</p>
+
+  <h2>Partial failure</h2>
+  <p>In a distributed system, a <strong>partial failure</strong> is the normal state of affairs: one node is overloaded, one link drops packets, one disk is slow, and everything else is fine. Worse, these failures are <em>nondeterministic</em>. The same request may succeed, fail, or do something in between, and you may not be able to find out which.</p>
+
+  <p>Not every large system treats this the same way. A supercomputer running a weather simulation for a week typically checkpoints its state, and when a node dies it stops the whole job and restarts from the last checkpoint. That turns a partial failure back into a total one, which is acceptable for batch work. An online service cannot do that. It runs on commodity machines in shared datacentres, it must stay available while machines are replaced and software is upgraded one node at a time, and its users are spread across continents. Such a system has to tolerate partial failure in software, because there will always be something broken somewhere.</p>
+
+  <h2>What the sender cannot know</h2>
+  <p>Most datacentre networks, and the internet, are <strong>asynchronous packet networks</strong>. A node can send a packet to another, but the network promises neither when it will arrive nor that it will arrive at all. When you send a request and wait for an answer, many different things can go wrong, and from the sender's side they all look the same.</p>
+
+  <figure class="widget" id="fates">
+    <p class="widget-title">Six ways to hear nothing</p>
+    <p class="widget-sub">Pick what goes wrong and watch the diagram. The client gives up one second after sending.</p>
+    <div class="ch8-fates" role="group" aria-label="What goes wrong">
+      <button class="btn" data-fate="req-lost" aria-pressed="false">Request lost</button>
+      <button class="btn" data-fate="req-delayed" aria-pressed="false">Request delayed</button>
+      <button class="btn" data-fate="server-crash" aria-pressed="false">Server crashed</button>
+      <button class="btn" data-fate="server-pause" aria-pressed="false">Server paused</button>
+      <button class="btn" data-fate="resp-lost" aria-pressed="true">Response lost</button>
+      <button class="btn" data-fate="resp-delayed" aria-pressed="false">Response delayed</button>
+    </div>
+    <div class="btn-row">
+      <label class="btn check"><input type="checkbox" id="fate-hide"> Show only what the client can see</label>
+      <button class="btn" data-replay>Replay</button>
+    </div>
+    <div class="scroll-x"><svg class="ch8-st" role="img" aria-label="Space-time diagram: the client line on top, the server line below, time running to the right, messages drawn as arrows"></svg></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Request reached the server</div><div class="stat-value sm" data-out="reached"></div></div>
+      <div class="stat"><div class="stat-label">Server did the work</div><div class="stat-value sm" data-out="work"></div></div>
+      <div class="stat"><div class="stat-label">Client heard before giving up</div><div class="stat-value sm" data-out="before"></div></div>
+      <div class="stat"><div class="stat-label">Client heard afterwards</div><div class="stat-value sm" data-out="after"></div></div>
+    </div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>What the client heard before giving up never changes. Whatever happened, the client knows only that it has no answer yet. In four of the six cases the server did the work anyway, so a blind retry of something like "charge this card" can run twice.<span class="sidenote">TCP does not close this gap. A TCP acknowledgement means the remote kernel received the bytes, not that the application processed them before it crashed.</span> This is why idempotent operations and request IDs show up all over distributed systems.</p>
+
+  <p>Network faults are not rare in practice. Operators of large datacentres report regular trouble from misconfigured or rebooting switches, links that fail in only one direction, and whole racks cut off when their top-of-rack switch dies. When part of the network is cut off from the rest, that is a <strong>network partition</strong>. You do not have to make the network perfect, but you do need to know what your software does when it misbehaves, and the honest way to find out is to break it on purpose in testing.</p>
+
+  <p>Sometimes there is direct feedback. If the machine is up but no process listens on the port, the operating system answers with a reset. A router that knows a host is unreachable may say so. A process that crashes while its machine survives can have a supervisor tell the rest of the cluster. But none of these cover a frozen process, a dead machine, or a silent link, so in the end every system relies on a <strong>timeout</strong>.</p>
+
+  <h2>Where the delay comes from</h2>
+  <p>If the network had a known maximum delay <em>d</em> and the server always answered within <em>r</em>, a timeout of 2<em>d</em> + <em>r</em> would be exact. Real networks give no such bound. Most of the variable delay is time spent waiting in queues:</p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 150" role="img" aria-label="A packet's path from sender application through the OS send queue, a shared switch port, the receiver's OS queue, to the receiver application, with the source of delay at each step">
+      <defs><marker id="q-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink-3)"/></marker></defs>
+      <text x="300" y="12" class="diagram-sub" style="font-size:11px" text-anchor="middle">other traffic</text>
+      <g style="stroke:var(--ink-3);stroke-width:1.5">
+        <line x1="286" y1="18" x2="300" y2="48" marker-end="url(#q-arr)"/>
+        <line x1="338" y1="18" x2="324" y2="48" marker-end="url(#q-arr)"/>
+        <line x1="104" y1="77" x2="128" y2="77" marker-end="url(#q-arr)"/>
+        <line x1="234" y1="77" x2="258" y2="77" marker-end="url(#q-arr)"/>
+        <line x1="364" y1="77" x2="388" y2="77" marker-end="url(#q-arr)"/>
+        <line x1="494" y1="77" x2="518" y2="77" marker-end="url(#q-arr)"/>
+      </g>
+      <g class="dg-node"><rect x="0" y="52" width="104" height="50" rx="8"/><text x="12" y="74">Sender app</text></g>
+      <g class="dg-node"><rect x="130" y="52" width="104" height="50" rx="8"/><text x="142" y="72">Send queue</text></g>
+      <g class="dg-node active"><rect x="260" y="52" width="104" height="50" rx="8"/><text x="272" y="72">Switch port</text></g>
+      <g class="dg-node"><rect x="390" y="52" width="104" height="50" rx="8"/><text x="402" y="72">Receive queue</text></g>
+      <g class="dg-node"><rect x="520" y="52" width="104" height="50" rx="8"/><text x="532" y="74">Receiver app</text></g>
+      <g style="stroke:var(--line-2)">
+        <rect x="142" y="82" width="12" height="10" rx="2" style="fill:var(--accent-soft)"/><rect x="158" y="82" width="12" height="10" rx="2" style="fill:var(--accent-soft)"/><rect x="174" y="82" width="12" height="10" rx="2" style="fill:var(--bg)"/><rect x="190" y="82" width="12" height="10" rx="2" style="fill:var(--bg)"/><rect x="206" y="82" width="12" height="10" rx="2" style="fill:var(--bg)"/>
+        <rect x="272" y="82" width="12" height="10" rx="2" style="fill:var(--orange-soft)"/><rect x="288" y="82" width="12" height="10" rx="2" style="fill:var(--orange-soft)"/><rect x="304" y="82" width="12" height="10" rx="2" style="fill:var(--orange-soft)"/><rect x="320" y="82" width="12" height="10" rx="2" style="fill:var(--orange-soft)"/><rect x="336" y="82" width="12" height="10" rx="2" style="fill:var(--orange-soft)"/>
+        <rect x="402" y="82" width="12" height="10" rx="2" style="fill:var(--accent-soft)"/><rect x="418" y="82" width="12" height="10" rx="2" style="fill:var(--accent-soft)"/><rect x="434" y="82" width="12" height="10" rx="2" style="fill:var(--accent-soft)"/><rect x="450" y="82" width="12" height="10" rx="2" style="fill:var(--bg)"/><rect x="466" y="82" width="12" height="10" rx="2" style="fill:var(--bg)"/>
+      </g>
+      <g class="diagram-sub" style="font-size:11px" text-anchor="middle">
+        <text x="52" y="122">writes to a socket</text>
+        <text x="182" y="122">TCP flow control</text><text x="182" y="136">may hold data back</text>
+        <text x="312" y="122">shared output link</text><text x="312" y="136">drops when full</text>
+        <text x="442" y="122">waits for a free</text><text x="442" y="136">CPU core</text>
+        <text x="572" y="122">its VM may be</text><text x="572" y="136">paused right now</text>
+      </g>
+    </svg>
+    </div>
+    <figcaption>Every hop has a queue. When a switch queue overflows, the packet is dropped and TCP resends it only after a retransmission timeout, which can add hundreds of milliseconds.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>Switch queues.</strong> When several machines send to the same destination at once, their packets wait for the one output link. If the queue fills, packets are dropped.</li>
+    <li><strong>Operating system queues.</strong> A packet that has arrived waits until the application thread gets a CPU core.</li>
+    <li><strong>Virtualization.</strong> A virtual machine can be paused for tens of milliseconds while the hypervisor runs another tenant, and incoming data is buffered in the meantime.</li>
+    <li><strong>TCP itself.</strong> Flow control slows a sender down to protect the receiver and the network, and lost packets are retried only after a timeout, so loss shows up as delay.</li>
+  </ul>
+
+  <p>In a public cloud you share all of these with strangers. A neighbour running a large shuffle in Spark can fill the switch you depend on, and you will see it only as unexplained latency. This is also why latency-sensitive traffic such as voice calls often uses UDP: a packet that arrives too late is useless, so it is better not to retransmit it at all.</p>
+
+  <h2>Choosing a timeout</h2>
+  <p>A short timeout notices a dead node quickly but sometimes declares a healthy, merely slow node dead. A long timeout avoids false alarms but leaves requests waiting on a node that is gone. A false alarm is not free: the cluster moves the node's work elsewhere, which adds load to nodes that may already be struggling, and an action that was in progress may run a second time. The simulation below pings a healthy node once a second and also crashes it hundreds of times at random moments.</p>
+
+  <figure class="widget" id="timeouts">
+    <p class="widget-title">The timeout trade-off</p>
+    <p class="widget-sub">6,000 simulated pings to a healthy node. Pings to the right of the timeout count as false alarms.</p>
+    <div class="controls">
+      <div class="control"><label for="to-timeout">Timeout <output></output></label><input id="to-timeout" type="range" min="0" max="100" step="1" value="59"></div>
+      <div class="control"><label for="to-congestion">Network load <output></output></label><input id="to-congestion" type="range" min="0" max="100" step="1" value="30"></div>
+    </div>
+    <div class="chart"></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">False alarms per hour</div><div class="stat-value" data-out="false"></div></div>
+      <div class="stat"><div class="stat-label">Pings slower than timeout</div><div class="stat-value" data-out="rate"></div></div>
+      <div class="stat"><div class="stat-label">Time to notice a crash, average</div><div class="stat-value" data-out="detect"></div></div>
+      <div class="stat"><div class="stat-label">Time to notice a crash, worst</div><div class="stat-value" data-out="worst"></div></div>
+    </div>
+    <div class="verdict"></div>
+    <figcaption>Round trips are mostly about a millisecond and a half. A few wait in queues, fewer hit a TCP retransmission, and a handful meet a remote process that is paused. The histogram uses a square-root scale so the rare slow pings stay visible.</figcaption>
+  </figure>
+
+  <p>There is no correct value to look up. The practical approach is to measure the distribution of round-trip times on your own network, over days rather than minutes, and pick a timeout from its tail. Better still, let the system adjust as conditions change. A <strong>phi accrual failure detector</strong>, used by Akka and Cassandra, does this: instead of a yes or no verdict, it keeps a running estimate of how heartbeat intervals are distributed and reports a suspicion level that rises the longer a heartbeat is overdue.<span class="sidenote">Each component can then pick its own threshold on the same suspicion value, trading speed against false alarms independently.</span></p>
+
+  <h2>Circuits versus packets</h2>
+  <p>Telephone networks once showed that bounded delay is possible. A call sets up a <strong>circuit</strong>: a fixed share of bandwidth reserved along the whole route for as long as the call lasts. Nobody else can use that share, so there is nothing to queue behind, and the end-to-end delay has a known upper limit. Such a network is <em>synchronous</em> in the technical sense.</p>
+
+  <p>Datacentre networks chose differently, and for good reason. Data transfers are bursty: a file copy wants all the bandwidth it can get for a few seconds, then nothing. Reserving a fixed slice per connection would either waste capacity or make transfers slow. Packet switching lets every connection share whatever bandwidth is free right now, which uses the hardware far better, at the price of queues and therefore unbounded delay. Quality of service features and admission control can narrow the variation, but multi-tenant clouds do not offer them to you. Unbounded delay is the cost of cheap, high utilization, and your timeouts have to live with it.</p>
+
+  <p class="book-ref">In the book: Chapter 8, "Faults and Partial Failures" and "Unreliable Networks" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch8-networks.js"></script>
+</body>
+</html>

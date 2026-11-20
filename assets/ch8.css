@@ -1,0 +1,29 @@
+/* =========================================================
+   Chapter 8: distributed-systems visuals.
+   Loaded after style.css. Colors only via its variables.
+   ========================================================= */
+
+/* Space-time diagrams are wider than a phone; scroll them instead of shrinking text. */
+.scroll-x > svg.ch8-st { min-width: 600px; }
+
+/* Code with one line called out. */
+pre.ch8-code { margin: 0 0 14px; }
+pre.ch8-code .hot { display: inline-block; width: 100%; background: var(--orange-soft); color: var(--ink); border-radius: 3px; }
+pre.ch8-code .cm { color: var(--ink-3); }
+
+/* Safety versus liveness rows. */
+.ch8-prop { padding: 10px 0 12px; border-top: 1px solid var(--line); }
+.ch8-prop:first-child { border-top: 0; padding-top: 0; }
+.ch8-prop svg { display: block; width: 100%; overflow: visible; }
+.ch8-kind { font: 500 10.5px/1.3 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; margin: 0; }
+.ch8-kind.safety { color: var(--purple); }
+.ch8-kind.liveness { color: var(--accent); }
+.ch8-ptext { font: 500 14px/1.4 var(--sans); color: var(--ink); margin: 2px 0 2px; }
+.ch8-status { font: 13px/1.45 var(--sans); color: var(--ink-3); margin: 2px 0 0; }
+.ch8-status.violated { color: var(--red); }
+.ch8-status.pending { color: var(--orange); }
+.ch8-status.satisfied { color: var(--green); }
+
+/* Fate picker: six buttons wrap into a tidy grid on small screens. */
+.ch8-fates { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.ch8-fates .btn { justify-content: center; }

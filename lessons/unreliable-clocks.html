@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unreliable clocks · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch8.css">
+</head>
+<body data-lesson="unreliable-clocks">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Unreliable clocks</h1>
+  </header>
+
+  <p>Applications ask the clock two kinds of question. How long did something take: a request duration, a cache entry's age, whether a timeout has passed. And when did something happen: the time on a log line, the expiry date of a session, the moment a row was written. Each machine answers both questions with its own hardware, usually a quartz oscillator, and no two machines agree exactly.</p>
+
+  <h2>Two kinds of clock</h2>
+  <p>A <strong>time-of-day clock</strong> returns the current date and time, typically as seconds since the Unix epoch. On Linux this is <code>clock_gettime(CLOCK_REALTIME)</code>; in Java it is <code>System.currentTimeMillis()</code>. It is kept close to everyone else's time by synchronizing with NTP servers, and that is exactly what makes it awkward: when the local clock has run too far ahead, synchronization can set it back, so a later reading can be smaller than an earlier one.<span class="sidenote">Leap seconds cause similar trouble. A minute that lasts 61 seconds has broken real systems that assumed time only moves forward in even steps.</span></p>
+
+  <p>A <strong>monotonic clock</strong>, such as <code>CLOCK_MONOTONIC</code> or Java's <code>System.nanoTime()</code>, only ever moves forward. Its absolute value means nothing (it might count from boot), so comparing it between two machines is pointless. NTP may speed it up or slow it down slightly, by at most about 0.05 percent, but never makes it jump. Use it for every elapsed-time measurement, timeouts included.</p>
+
+  <h2>Synchronization is rough</h2>
+  <p>A quartz crystal's frequency depends on its temperature and its manufacturing, so clocks <em>drift</em>: commodity servers can gain or lose tens of milliseconds an hour, and a bad one does much worse. NTP corrects this by asking a server for the time, but its accuracy is limited by the network delay to that server, which, as the previous lesson showed, is not predictable. Over the internet, errors of tens of milliseconds are ordinary, and spikes during congestion can be far larger. A machine whose clock has drifted too far may refuse to synchronize or be forcibly stepped. A firewall that silently blocks NTP can leave a node drifting for weeks before anyone notices. Virtual machines add their own jitter, because a VM's notion of time stalls while it is not scheduled.</p>
+
+  <p>Very good accuracy is possible, with GPS receivers in every rack and the Precision Time Protocol, and trading firms do this because regulators require it. Most systems do not, so the realistic assumption is: clocks are usually close, occasionally wrong by a lot, and nothing will tell you which situation you are in.</p>
+
+  <h2>Ordering events by timestamp</h2>
+  <p>The danger is software that quietly depends on clocks being right. A common case is <strong>last write wins</strong> conflict resolution, used by Cassandra and other multi-leader and leaderless databases: every write carries a timestamp, and when two replicas disagree, the write with the larger timestamp survives. If the timestamps come from time-of-day clocks on different machines, "larger timestamp" is not the same as "later".</p>
+
+  <figure class="widget" id="lww">
+    <p class="widget-title">Three clocks and one thermostat</p>
+    <p class="widget-sub">Priya sets the hallway to 19° through node B. Tomas sets it to 23° through node C a moment later. Every node keeps the write with the higher timestamp.</p>
+    <div class="controls">
+      <div class="control"><label for="lww-skew">Starting skew, B ahead of C <output></output></label><input id="lww-skew" type="range" min="0" max="600" step="10" value="300"></div>
+      <div class="control"><label for="lww-drift">Drift, B fast and C slow <output></output></label><input id="lww-drift" type="range" min="0" max="100" step="1" value="10"></div>
+      <div class="control"><label for="lww-gap">Tomas writes after Priya by <output></output></label><input id="lww-gap" type="range" min="20" max="1000" step="10" value="200"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn" data-ntp aria-pressed="false">Sync all clocks with NTP at 4 s</button>
+    </div>
+    <div class="chart"></div>
+    <div class="legend"><span><i style="background:var(--ink-3)"></i>node A</span><span><i style="background:var(--accent)"></i>node B</span><span><i style="background:var(--orange)"></i>node C</span><span>error in ms = clock reading minus true time</span></div>
+    <div class="scroll-x" style="margin-top:18px"><svg class="ch8-st" role="img" aria-label="Space-time diagram of the two writes replicating between nodes A, B and C, with the timestamp each write carries"></svg></div>
+    <div class="legend"><span><i style="background:var(--ink-3)"></i>arrows carry Priya's write</span><span><i style="background:var(--accent)"></i>arrows carry Tomas's write</span></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Really happened first</div><div class="stat-value sm" data-out="first"></div></div>
+      <div class="stat"><div class="stat-label">Higher timestamp</div><div class="stat-value sm" data-out="stamp"></div></div>
+      <div class="stat"><div class="stat-label">Every node now shows</div><div class="stat-value sm" data-out="final"></div></div>
+    </div>
+    <div class="verdict"></div>
+    <p class="note" data-out="jump"></p>
+  </figure>
+
+  <p>Two things make this dangerous. The lost write disappears silently: the database reports success to Tomas, every replica agrees, and the data is simply wrong. And synchronization does not solve it. Turn on the NTP sync and raise the drift: after a few seconds the clocks are apart again, and any two writes closer together than the current skew can be reordered. Clocks good enough for log files are not good enough to decide which of two writes was later. For that, use <em>logical clocks</em>, such as version numbers or version vectors, which count events instead of measuring time.</p>
+
+  <h2>A reading is a range</h2>
+  <p>It helps to think of a clock reading not as a point but as an interval. If a machine synchronized two minutes ago with a server 20 milliseconds away, and its crystal drifts at a known worst-case rate, the true time is somewhere in a window around what the clock says. Most APIs hide that window and return a single number with misleading precision.</p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 196" role="img" aria-label="Clock readings as uncertainty intervals: two separate intervals have a known order, overlapping intervals do not, and waiting out the interval before committing keeps later intervals separate">
+      <text x="0" y="34" class="diagram-label">Intervals apart</text>
+      <text x="0" y="50" class="diagram-sub" style="font-size:11px">A was surely first</text>
+      <rect x="170" y="25" width="150" height="16" rx="8" style="fill:var(--accent-soft);stroke:var(--accent)"/>
+      <text x="180" y="37" style="font-size:11px;fill:var(--accent);font-weight:600">A</text>
+      <rect x="390" y="25" width="150" height="16" rx="8" style="fill:var(--accent-soft);stroke:var(--accent)"/>
+      <text x="400" y="37" style="font-size:11px;fill:var(--accent);font-weight:600">B</text>
+
+      <text x="0" y="94" class="diagram-label">Intervals overlap</text>
+      <text x="0" y="110" class="diagram-sub" style="font-size:11px">order unknown</text>
+      <rect x="270" y="82" width="90" height="20" style="fill:var(--orange-soft)"/>
+      <rect x="170" y="78" width="190" height="16" rx="8" style="fill:var(--accent-soft);stroke:var(--accent)"/>
+      <text x="180" y="90" style="font-size:11px;fill:var(--accent);font-weight:600">A</text>
+      <rect x="270" y="90" width="200" height="16" rx="8" style="fill:var(--accent-soft);stroke:var(--accent)"/>
+      <text x="455" y="102" text-anchor="end" style="font-size:11px;fill:var(--accent);font-weight:600">B</text>
+      <text x="315" y="124" text-anchor="middle" style="font-size:11px;fill:var(--orange)">either could be first</text>
+
+      <text x="0" y="154" class="diagram-label">Commit wait</text>
+      <text x="0" y="170" class="diagram-sub" style="font-size:11px">wait out A's interval</text>
+      <rect x="170" y="145" width="150" height="16" rx="8" style="fill:var(--accent-soft);stroke:var(--accent)"/>
+      <text x="180" y="157" style="font-size:11px;fill:var(--accent);font-weight:600">A</text>
+      <circle cx="320" cy="153" r="4.5" style="fill:var(--accent)"/>
+      <text x="320" y="180" text-anchor="middle" style="font-size:11px;fill:var(--ink-3)">A commits only when</text>
+      <text x="320" y="192" text-anchor="middle" style="font-size:11px;fill:var(--ink-3)">its interval has passed</text>
+      <rect x="350" y="145" width="220" height="16" rx="8" style="fill:var(--accent-soft);stroke:var(--accent)"/>
+      <text x="360" y="157" style="font-size:11px;fill:var(--accent);font-weight:600">B, any later transaction</text>
+      <line x1="170" y1="12" x2="630" y2="12" style="stroke:var(--line-2)"/>
+      <text x="630" y="8" text-anchor="end" class="diagram-sub" style="font-size:11px">true time →</text>
+    </svg>
+    </div>
+    <figcaption>Each bar is the range in which the true time of an event could lie, according to the machine that recorded it.</figcaption>
+  </figure>
+
+  <p>Google's Spanner makes the window explicit. Its TrueTime API returns an earliest and a latest possible time, and Spanner uses that for snapshot isolation across datacentres. Before a transaction commits, Spanner waits until the uncertainty window of its timestamp has passed, so any transaction that starts afterwards must get a timestamp with no overlap. The wait is only cheap if the window is small, which is why Google puts GPS receivers and atomic clocks in each datacentre to keep it to a few milliseconds.</p>
+
+  <h2>Process pauses</h2>
+  <p>Clocks have one more trap, and it applies even to a monotonic clock read on a single machine. Consider a node that holds a <strong>lease</strong>: a lock with a timeout, granted by a lease service, that lets one node at a time act as leader for some piece of data. The node checks how long it has left, and if enough remains, it does the work.</p>
+
+<pre class="ch8-code"><code>deadline = granted_at + LEASE_SECONDS          <span class="cm"># monotonic clock</span>
+while True:
+    batch = inbox.take()
+    if monotonic_now() &gt; deadline - 1.0:
+        deadline = renew_or_step_down()
+<span class="hot">    <span class="cm"># checked: 2.6 s to spare. A pause can start right here.</span></span>
+    storage.put(plan_for(batch))</code></pre>
+
+  <p>The code assumes that almost no time passes between the check and the write. Nothing guarantees that.</p>
+
+  <figure class="widget" id="lease">
+    <p class="widget-title">The lease that ran out mid-request</p>
+    <p class="widget-sub">node-1 checks its lease at 7.4 s with 2.6 s to spare, then freezes. Choose how long.</p>
+    <div class="controls">
+      <div class="control"><label for="lease-pause">Pause length <output></output></label><input id="lease-pause" type="range" min="0" max="12" step="0.1" value="4"></div>
+    </div>
+    <div class="btn-row"><button class="btn primary" data-play>Play in time</button></div>
+    <div class="scroll-x"><svg class="ch8-st" role="img" aria-label="Space-time diagram: node-1, the lease service, node-2 and storage, with node-1's pause shown as a band"></svg></div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>A thread can stop for seconds at a time for many ordinary reasons. A stop-the-world garbage collection in the JVM has been known to last minutes. A hypervisor can suspend a virtual machine to migrate it to another host. A laptop lid closes. The operating system can switch to other threads, or a noisy neighbour can steal CPU time from a VM. A memory access can trigger a page fault that waits for the disk, and in a machine short on memory, swapping can make that constant. Someone can send the process <code>SIGSTOP</code> by pressing Ctrl-Z. The paused thread notices none of this. When it resumes, it carries on from the next line, sure of a check it made long ago.</p>
+
+  <p>Systems that must answer by a deadline, such as aircraft controls, use real-time operating systems, careful memory allocation, and a great deal of testing to guarantee a response time. That is expensive and slows development, so ordinary data systems instead limit the damage. Some runtimes can warn the application that a long collection is coming, so the node stops taking requests while it runs, as if it were a short planned outage. Another approach is to allocate only short-lived objects, which are cheap to collect, and restart processes before the long-lived heap needs a full collection. Neither guarantees anything, which is why the next lesson asks how the rest of the system can protect itself from a node that wakes up with stale beliefs.</p>
+
+  <p class="book-ref">In the book: Chapter 8, "Unreliable Clocks" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch8-clocks.js"></script>
+</body>
+</html>
