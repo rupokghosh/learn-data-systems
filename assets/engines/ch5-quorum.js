@@ -105,7 +105,8 @@ export function quorumCluster({ n = 3, w = 2, r = 2, sloppy = false, seed = 11, 
       if (!mine.length || !sp.up) continue;
       sp.hints = sp.hints.filter((h) => h.for !== node.id);
       const ver = Math.max(...mine.map((h) => h.ver));
-      sim.send(s, node.id, "put", { ver, repair: true }, { label: "handoff", cls: "hint", delay: base * 1.6 });
+      // Handoff is background work, so it takes a while: a read right after recovery can beat it.
+      sim.send(s, node.id, "put", { ver, repair: true }, { label: "handoff", cls: "hint", delay: base * 3 });
     }
   };
 

@@ -1,5 +1,5 @@
 // Chapter 5, lesson 5: sibling values on one server, then version vectors across three replicas.
-import { siblingStore, SIBLING_SCRIPT, POOLS, vvStore, VV_EXAMPLE, VV_NODES, fmtVV } from "../engines/ch5-versions.js";
+import { siblingStore, SIBLING_SCRIPT, POOLS, mergeSiblings, vvStore, VV_EXAMPLE, VV_NODES, fmtVV } from "../engines/ch5-versions.js";
 import { makeClock, spaceTime, esc } from "./ch5-util.js";
 
 const list = (arr) => (arr.length < 2 ? arr.join("") : arr.slice(0, -1).join(", ") + " and " + arr[arr.length - 1]);
@@ -56,7 +56,8 @@ const list = (arr) => (arr.length < 2 ? arr.join("") : arr.slice(0, -1).join(", 
 
   function say(sim, srv) {
     const set = (cls, t) => { verdict.className = `verdict ${cls}`; verdict.textContent = t; };
-    const back = removedStove && ["noor", "felix"].some((id) => sim.node(id).items.includes("stove"));
+    // Judge by what the server's siblings merge to: a phone that has not read since the removal still shows stove, and that is not the bug.
+    const back = removedStove && mergeSiblings(srv.siblings, sim.cfg.tombstones).items.includes("stove");
     if (back && !sim.cfg.tombstones) return set("bad", "Stove is back. Felix removed it, but Noor's concurrent sibling still contained it, and a union cannot tell a removed item from one that was never added. Turn on tombstones and play the example again.");
     if (removedStove && sim.cfg.tombstones && !back && srv.siblings.some((s) => s.items.includes("stove"))) return set("good", "Stove stays removed: Felix's sibling carries a tombstone for it, and the merge subtracts every tombstone from the union. The tombstones themselves must be kept until no older sibling can bring the item back.");
     if (srv.siblings.length > 1) return set("", `The server holds ${srv.siblings.length} siblings: writes it could not order, because neither writer had seen the other's value. It keeps them all and lets the client merge them.`);

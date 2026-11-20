@@ -26,7 +26,7 @@ function rebuild() {
 let g = null; // geometry and element handles from the last layout
 function layout(width) {
   chart.innerHTML = "";
-  const h = 262, axisW = 34, top = 52, base = 206;
+  const h = 262, axisW = 40, top = 52, base = 206;
   const svg = el("svg", { viewBox: `0 0 ${width} ${h}`, height: h, role: "img", "aria-label": "Share of recent writes on each of 8 partitions" }, chart);
   const y = (share) => base - share * (base - top);
   const slot = (width - axisW) / NPART;
@@ -52,8 +52,9 @@ function layout(width) {
   const ml = el("text", { x: axisW - 6, y: base + 38, "text-anchor": "end", class: "ch6-axis" }, svg);
   ml.textContent = "scan";
   const fair = el("line", { x1: axisW, x2: width, y1: y(1 / NPART), y2: y(1 / NPART), class: "ch6-fair" }, svg);
-  const fl = el("text", { x: width - 2, y: y(1 / NPART) - 4, "text-anchor": "end", class: "ch6-axis" }, svg);
-  fl.textContent = "fair share";
+  // Labelled in the axis column: at the right end it collided with the bar values, which sit near this line.
+  const fl = el("text", { x: axisW - 6, y: y(1 / NPART) + 4, "text-anchor": "end", class: "ch6-axis" }, svg);
+  fl.textContent = "fair";
   const dots = el("g", {}, svg);
   g = { y, cx, bars, vals, marks, src, dots, fair, top };
   update();

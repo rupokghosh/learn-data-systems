@@ -96,9 +96,13 @@ function say(sim, lost, leaders) {
   if (lost.size) {
     const f = sim.failovers[sim.failovers.length - 1];
     const many = lost.size > 1;
-    const why = f ? ` The client was told ${many ? "they were" : "it was"} saved, but ${f.to} never received ${many ? "them" : "it"} before ${f.from} crashed, and ${f.to} is now the leader.` : "";
+    // Writes the old leader took after the failover (while it still thought it led) were never sent to the new leader at all.
+    const late = f && [...lost].some((w) => sim.writes.get(w).at > f.t);
+    const why = !f ? "" : late
+      ? ` The client was told ${many ? "they were" : "it was"} saved by ${f.from}, which still thought it led after ${f.to} had taken over.`
+      : ` The client was told ${many ? "they were" : "it was"} saved, but ${f.to} never received ${many ? "them" : "it"} before ${f.from} crashed, and ${f.to} is now the leader.`;
     const back = f && sim.node(f.from).up && sim.node(f.from).role === "follower" ? ` When ${f.from} came back it rejoined as a follower and threw away its own copy.` : "";
-    return set("bad", `Acknowledged but lost: ${list([...lost])}.${why}${back} Reset, make one follower synchronous, and repeat.`);
+    return set("bad", `Acknowledged but lost: ${list([...lost])}.${why}${back} ${late ? "Fencing from the start prevents this." : "Reset, make one follower synchronous, and repeat."}`);
   }
   if (!cur.up) return set("", `${cur.id} is down. Writes sent to it get no reply. Press Run failover to promote a follower.`);
   const blocked = cur.pending.length && cur.followers.some((f) => sim.cfg.sync.has(f) && !sim.node(f).up);

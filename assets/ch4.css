@@ -66,6 +66,8 @@
 .bit.lost.one { background: var(--red); }
 @media (max-width: 560px) { .bits { grid-template-columns: repeat(32, minmax(0, 1fr)); } .bit { height: 14px; } }
 .bits-axis { display: flex; justify-content: space-between; font: 11px/1.3 var(--sans); color: var(--ink-3); }
+/* Twenty-digit numbers are wider than a stat column on a phone: let them wrap instead of being cut off. */
+#doubles .stat-value { overflow-wrap: anywhere; }
 
 /* ---------- Varint lab ---------- */
 .vgroups { display: flex; flex-wrap: wrap; gap: 10px 14px; margin: 6px 0 4px; }

@@ -43,7 +43,7 @@ function drawPanel(p, sc, t, final) {
     const [a, b] = sc.faultLink;
     const xa = laneX(a, n), xb = laneX(b, n);
     el("rect", { x: Math.min(xa, xb), y: y(FAULT.from), width: Math.abs(xb - xa), height: y(FAULT.to) - y(FAULT.from), class: "df-fault" }, svg);
-    const lbl = el("text", { x: (xa + xb) / 2, y: y(FAULT.to) - 6, "text-anchor": "middle", class: "df-fault-label" }, svg);
+    const lbl = el("text", { x: (xa + xb) / 2, y: y(FAULT.to) - 18, "text-anchor": "middle", class: "df-fault-label" }, svg);
     lbl.textContent = "link down";
   }
   // lanes

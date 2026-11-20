@@ -19,10 +19,11 @@ let seed = 11;
 const cfg = () => ({ n: +nIn.value, w: +wIn.value, r: +rIn.value, sloppy: sloppyBox.checked });
 
 function reset() {
-  const c = cfg();
-  clock.set(quorumCluster({ ...c, seed: seed++ }));
-  repEl.innerHTML = clock.sim.home.map((id) => `<button class="btn sm" data-rep="${id}" aria-pressed="false">${id}</button>`).join("");
-  render();
+  const sim = quorumCluster({ ...cfg(), seed: seed++ });
+  // Rebuild the replica buttons before the first draw: with a smaller n, the old
+  // buttons name replicas that no longer exist.
+  repEl.innerHTML = sim.home.map((id) => `<button class="btn sm" data-rep="${id}" aria-pressed="false">${id}</button>`).join("");
+  clock.set(sim);
 }
 
 function syncSliders() {
@@ -96,8 +97,8 @@ function say(sim) {
   const repaired = op.repaired.length ? ` Read repair sent v${op.result} to ${list([...new Set(op.repaired)])}.` : "";
   const both = op.counted.filter((id) => (sim.lastWrite()?.acks || []).includes(id));
   if (op.stale) {
-    const hints = SPARES.some((s) => sim.node(s).hints.length);
-    const why = hints ? "The newest copies sit on stand-in nodes that reads do not consult: a sloppy quorum is not a quorum."
+    const hints = SPARES.some((s) => sim.node(s).hints.length) || sim.msgs.some((m) => m.label === "handoff" && m.sent <= op.t && m.arrive > op.t);
+    const why = hints ? "The newest copies sat on stand-in nodes, or were still being handed back, and reads do not consult stand-ins: a sloppy quorum is not a quorum."
       : w + r <= n ? `With w + r ≤ n, the ${r} replica${r > 1 ? "s" : ""} that answered first did not have to include any that acknowledged the write.`
       : "The replicas that answered had missed the write.";
     return set("bad", `Stale read: the client got v${op.result} from ${list(op.counted)}, but v${op.latestAtStart} had been written successfully. ${why}${repaired}`);

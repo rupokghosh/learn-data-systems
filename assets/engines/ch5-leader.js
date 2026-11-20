@@ -54,7 +54,7 @@ export function leaderCluster({ seed = 7, base = 120, sync = new Set(), fence = 
     }
     const idx = node.log.length;
     node.log.push({ w, epoch: node.epoch });
-    sim.writes.get(w).leader = node.id;
+    Object.assign(sim.writes.get(w), { leader: node.id, at: sim.t });
     sim.mark(node.id, "w" + w, "write");
     for (const f of node.followers) sim.send(node.id, f, "repl", { idx, w, epoch: node.epoch }, { label: null, cls: "repl" });
     node.pending.push({ w, idx, client: m.from });

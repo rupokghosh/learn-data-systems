@@ -60,7 +60,8 @@
         <rect x="578" y="96" width="16" height="30" rx="3" style="fill:var(--surface-2);stroke:var(--ink-4);stroke-dasharray:3 2"/><text x="582" y="115" style="fill:var(--ink-3)">4</text>
         <rect x="596" y="96" width="38" height="30" rx="3" style="fill:var(--green-soft);stroke:var(--green)"/><text x="602" y="115" style="fill:var(--ink)">teal</text>
       </g>
-      <text x="350" y="150" style="fill:var(--ink-3);font-size:11px">dashed: lengths and counts the reader needs to find the boundaries</text>
+      <text x="350" y="150" style="fill:var(--ink-3);font-size:11px">dashed: lengths and counts the reader</text>
+      <text x="350" y="165" style="fill:var(--ink-3);font-size:11px">needs to find the boundaries</text>
     </svg>
     </div>
   </figure>
@@ -133,7 +134,7 @@
 
   <h2>Binary variants of JSON</h2>
   <p>Inside one organization, where nobody needs to read the bytes by eye, a more compact and faster format is attractive. MessagePack, CBOR, BSON (the format MongoDB stores), and Smile all keep JSON's data model and change only the encoding: a type marker per value, integers in binary with explicit widths, and lengths in front of strings instead of quotes around them.</p>
-  <p>Look at what the inspector shows, though. The keys <code>observer</code>, <code>species</code>, and the rest are still spelled out in every single record, because without a schema the reader has no other way to know which value is which. For records with short values and descriptive names, the field names are most of the payload, and the binary variant saves only a fraction. Saving a fifth or a quarter is rarely worth giving up human readability. To do much better, the field names have to leave the data, and that requires a schema. That is the subject of the next lesson.</p>
+  <p>Look at what the inspector shows, though. The keys <code>observer</code>, <code>species</code>, and the rest are still spelled out in every single record, because without a schema the reader has no other way to know which value is which. For records with short values and descriptive names, the field names are most of the payload, and the binary variant saves only a fraction. Saving a quarter or a third is rarely worth giving up human readability. To do much better, the field names have to leave the data, and that requires a schema. That is the subject of the next lesson.</p>
   <p>None of this makes JSON a bad choice. For public APIs, configuration, and data exchanged between organizations, the fact that everyone can read and write it outweighs its size and its quirks, as long as both sides agree on the awkward parts, such as how big numbers and binary data are represented.</p>
 
   <p class="book-ref">In the book: Chapter 4, "Formats for Encoding Data" (1st edition).</p>

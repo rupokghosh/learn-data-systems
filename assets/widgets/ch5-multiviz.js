@@ -75,7 +75,7 @@ const list = (arr) => (arr.length < 2 ? arr.join("") : arr.slice(0, -1).join(", 
       const win = v.winner;
       const later = lost.filter((w) => w.real > win.real);
       let t = `Every data centre converged on ${win.val}, the edit with the highest timestamp. ${list(lost.map((w) => w.val))} ${lost.length > 1 ? "were" : "was"} silently discarded: no error, no trace that ${lost.length > 1 ? "they" : "it"} ever existed.`;
-      if (later.length) t += ` ${list(later.map((w) => w.val))} was in fact written later than ${win.val}, but Singapore's clock runs 400 ms slow, so its timestamp was lower.`;
+      if (later.length) t += ` ${list(later.map((w) => w.val))} ${later.length > 1 ? "were" : "was"} in fact written later than ${win.val}, but Singapore's clock runs 400 ms slow, so ${later.length > 1 ? "their timestamps were" : "its timestamp was"} lower.`;
       return set("bad", t);
     }
     if (strategy === "merge" && v.conflict) return set("", `Every data centre converged on "${v.val}". Nothing was lost, but nobody chose this value either. Merging suits sets and counters better than a single destination.`);
@@ -189,6 +189,7 @@ const list = (arr) => (arr.length < 2 ? arr.join("") : arr.slice(0, -1).join(", 
     if (!missing.length) {
       if (down.length && kind === "all") return set("good", `${lastOp.id} reached every running leader. In all-to-all, each leader sends straight to every other, so a failure only affects the failed node.`);
       if (down.length && kind === "star") return set("good", `${lastOp.id} reached every running leader. Only the failed leaf misses out, because nothing has to pass through it.`);
+      if (down.length) return set("good", `${lastOp.id} reached every running leader: on its way round the ring it did not have to pass through ${list(down)}.`);
       return set("good", `${lastOp.id} reached every leader. Now fail one and write again.`);
     }
     if (kind === "circular") return set("bad", `${list(missing)} never received ${lastOp.id}, although ${missing.length > 1 ? "they are" : "it is"} running. In a ring every write passes through each node in turn, and ${list(down)} is down, so the chain is broken until someone reconfigures the ring.`);

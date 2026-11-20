@@ -106,6 +106,9 @@ import { renderBytes, infoBox } from "./ch4-byteview.js";
     if (!useZz && n < 0n) {
       v.className = "verdict bad";
       v.textContent = `A negative number without zigzag looks like a huge unsigned number, so it always takes ${bytes.length} bytes. This is why Protocol Buffers has sint64 alongside int64, and why Thrift CompactProtocol and Avro always zigzag.`;
+    } else if (bytes.length > 8) {
+      v.className = "verdict";
+      v.textContent = `${bytes.length} bytes, more than a fixed 8: each byte carries only 7 bits of the number, so the very largest values cost extra. Varints pay off because most numbers in real data are small.`;
     } else {
       v.className = "verdict good";
       v.textContent = `${bytes.length} ${bytes.length === 1 ? "byte" : "bytes"} instead of a fixed 8. Each byte carries 7 bits of the number, least significant group first, and its top bit says whether another byte follows.`;

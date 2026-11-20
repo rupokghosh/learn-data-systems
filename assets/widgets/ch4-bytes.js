@@ -62,7 +62,9 @@ import { slider } from "../charts.js";
     const v = $("#inspector-verdict");
     if (d.error === 0n) {
       v.className = "verdict good";
-      v.textContent = `The id survives: ${rec.id} is small enough (${bitLength(rec.id)} significant bits) to be held exactly by a double.`;
+      v.textContent = bitLength(rec.id) <= 53
+        ? `The id survives: ${rec.id} is small enough (${bitLength(rec.id)} significant bits) to be held exactly by a double.`
+        : `The id survives, but only by luck: ${rec.id} needs ${bitLength(rec.id)} bits and happens to end in enough zero bits to land exactly on a double. Most of its neighbours would not.`;
     } else {
       v.className = "verdict bad";
       v.textContent = `The writer sent ${rec.id}, but a reader that parses every JSON number into a double holds ${d.digits} and prints ${shownId}: off by ${(d.error < 0n ? -d.error : d.error).toString()}. Look the record up by that id and you get nothing, or someone else's sighting. MessagePack has a 64-bit integer type (marker 0xcf), so its bytes keep the exact value.`;
