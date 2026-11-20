@@ -1,0 +1,111 @@
+/* =========================================================
+   Chapter 12: the future of data systems.
+   Loaded after style.css. Colors come only from its tokens.
+   ========================================================= */
+
+.ch12-label { font: 12px/1.3 var(--sans); color: var(--ink-3); margin: 0 6px 0 0; }
+.btn-row .ch12-label { align-self: center; }
+
+/* ---------- Dataflow builder (SVG) ---------- */
+.df svg { min-width: 600px; }
+.df .log-row rect { fill: var(--surface-2); stroke: none; transition: fill 300ms ease; }
+.df .log-row.fresh rect { fill: var(--accent-soft); }
+.df .log-row text { font: 10.5px var(--mono); fill: var(--ink-2); }
+.df .log-row .off { fill: var(--ink-4); }
+.df .box rect.frame { fill: var(--bg); stroke: var(--line-2); stroke-width: 1; }
+.df .box.off rect.frame { stroke-dasharray: 4 4; fill: none; }
+.df .box.off text { fill: var(--ink-4); }
+.df .box.serving rect.frame { stroke: var(--accent); }
+.df .box.building rect.frame { stroke: var(--purple); stroke-dasharray: 5 3; }
+.df .box .t { font: 500 12.5px var(--sans); fill: var(--ink); }
+.df .box .s1 { font: 12px var(--sans); fill: var(--ink-2); }
+.df .box .s2 { font: 11px var(--sans); fill: var(--ink-3); }
+.df .box .st { font: 11px var(--sans); fill: var(--ink-3); }
+.df .box .st.behind { fill: var(--orange); }
+.df .box .st.replay { fill: var(--purple); }
+.df .badge rect { fill: var(--accent); }
+.df .badge text { font: 500 10px var(--sans); fill: var(--accent-ink); }
+.df .bar-bg { fill: var(--line); }
+.df .bar-fg { fill: var(--purple); }
+.df .flow { stroke: var(--line-2); stroke-width: 1.2; fill: none; }
+.df .flow.off { stroke-dasharray: 3 4; stroke: var(--line); }
+.df .pkt { fill: var(--accent); }
+.df .pkt.replay { fill: var(--purple); }
+.df .head { font: 500 12px var(--sans); fill: var(--ink-3); }
+
+/* ---------- Write path / read path ---------- */
+.wr-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin: 4px 0 6px; }
+.wr-stage { border: 1px solid var(--line-2); border-radius: 6px; padding: 7px 8px; font: 12px/1.35 var(--sans); color: var(--ink-2); min-height: 62px;
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease; }
+.wr-stage b { display: block; font-weight: 500; color: var(--ink); margin-bottom: 2px; }
+.wr-stage.w { background: var(--accent-soft); border-color: var(--accent); }
+.wr-stage.r { background: var(--orange-soft); border-color: var(--orange); }
+.wr-stage.na { color: var(--ink-4); border-style: dashed; }
+.wr-stage.na b { color: var(--ink-4); }
+.wr-axis { display: flex; justify-content: space-between; font: 12px/1.3 var(--sans); color: var(--ink-3); margin-bottom: 14px; }
+.wr-axis .w { color: var(--accent); }
+.wr-axis .r { color: var(--orange); }
+@media (max-width: 560px) {
+  .wr-strip { grid-template-columns: minmax(0, 1fr); }
+  .wr-stage { min-height: 0; }
+}
+.wr-desc { font: 13px/1.5 var(--sans); color: var(--ink-2); margin: 0 0 4px; }
+.wr-desc b { font-weight: 500; color: var(--ink); }
+
+/* ---------- Sequence diagram (end-to-end IDs) ---------- */
+.seq-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 12px 24px; align-items: start; }
+@media (max-width: 620px) { .seq-wrap { grid-template-columns: minmax(0, 1fr); } }
+.seq { overflow-x: auto; }
+.seq svg { display: block; width: 100%; min-width: 360px; }
+.seq .lifeline { stroke: var(--line-2); stroke-width: 1; }
+.seq .lane-name { font: 500 12px var(--sans); fill: var(--ink); }
+.seq .m { stroke: var(--ink-3); stroke-width: 1.4; fill: none; }
+.seq .m.lost { stroke: var(--red); stroke-dasharray: 4 3; }
+.seq .ml { font: 11px var(--mono); fill: var(--ink-2); }
+.seq .ml.lost { fill: var(--red); }
+.seq .x { stroke: var(--red); stroke-width: 2; }
+.seq .ev rect { fill: var(--surface-2); stroke: var(--line-2); }
+.seq .ev text { font: 11px var(--sans); fill: var(--ink-2); }
+.seq .ev.good rect { fill: var(--green-soft); stroke: var(--green); }
+.seq .ev.bad rect { fill: var(--red-soft); stroke: var(--red); }
+.seq .ev.warn rect { fill: var(--orange-soft); stroke: var(--orange); }
+.seq .step-n { font: 10px var(--sans); fill: var(--ink-4); }
+.seq .row-g { transition: opacity 250ms var(--ease-out); }
+.seq .row-g.hidden { opacity: 0; }
+.seq .row-g.past { opacity: 0.55; }
+table.db-rows { width: 100%; border-collapse: collapse; font: 12px/1.3 var(--mono); }
+.db-rows th { font: 500 11px var(--sans); color: var(--ink-3); text-align: left; padding: 4px 6px 4px 0; border-bottom: 1px solid var(--line-2); }
+.db-rows td { padding: 5px 6px 5px 0; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.db-rows tr.dup td { color: var(--red); background: var(--red-soft); }
+.db-rows tr.empty td { color: var(--ink-4); font-family: var(--sans); }
+.seq-now { font: 13px/1.5 var(--sans); color: var(--ink-2); min-height: 3em; margin-top: 10px; }
+
+/* ---------- Partitioned claims ---------- */
+.claims-grid { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 8px 24px; align-items: start; }
+@media (max-width: 620px) { .claims-grid { grid-template-columns: minmax(0, 1fr); } }
+.lane .rec.enter { transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out), background-color 200ms ease, border-color 200ms ease;
+  @starting-style { opacity: 0; transform: translateX(-6px); } }
+.rec.ok { background: var(--green-soft); border-color: var(--green); }
+.rec.no { background: var(--surface-2); border-color: var(--line-2); color: var(--ink-4); }
+.rec.no .k, .rec.no .v { color: var(--ink-4); text-decoration: line-through; }
+.rec.dupe { background: var(--red-soft); border-color: var(--red); }
+.rec.cursor { box-shadow: 0 0 0 2px var(--accent); }
+.rec .mark { font-family: var(--sans); font-size: 11px; }
+.owners { width: 100%; border-collapse: collapse; font: 12px/1.3 var(--sans); }
+.owners td { padding: 5px 0; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.owners td:first-child { font-family: var(--mono); color: var(--ink); width: 60px; }
+.owners tr.dup td { color: var(--red); }
+.clients { display: flex; flex-wrap: wrap; gap: 6px 14px; font: 12px/1.5 var(--sans); color: var(--ink-3); margin: 0 0 10px; }
+.clients b { font-weight: 500; color: var(--ink-2); }
+
+/* ---------- Feedback loop and anonymity ---------- */
+.fb-legend i.dash { background: none; border-top: 2px dashed var(--ink-3); height: 0; border-radius: 0; vertical-align: 3px; }
+.anon-bar { display: flex; height: 26px; border-radius: 4px; overflow: hidden; background: var(--surface-2); }
+.anon-bar span { display: block; height: 100%; }
+.anon-steps { list-style: none; padding: 0; margin: 14px 0 0; font: 13px/1.4 var(--sans); }
+.anon-steps li { display: grid; grid-template-columns: minmax(0, 1fr) 70px; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); color: var(--ink-2); margin: 0; }
+.anon-steps li.off { color: var(--ink-4); }
+.anon-steps .n { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 500; }
+.anon-steps li.off .n { color: var(--ink-4); font-weight: 400; }
+.anon-steps li.unique .n { color: var(--red); }
+.anon-steps .val { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }

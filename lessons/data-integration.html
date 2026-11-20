@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data integration · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch12.css">
+</head>
+<body data-lesson="data-integration">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Data integration</h1>
+  </header>
+
+  <p>Every earlier chapter ended with some version of "it depends". B-trees or LSM-trees, leaders or quorums, batch or streams: each tool is good at some access patterns and poor at others. A real application rarely has only one access pattern, so it rarely gets away with only one tool. The interesting engineering question is no longer which database to pick, but how to keep several of them telling the same story.</p>
+
+  <h2>One write, many shapes</h2>
+  <p>Picture a city bike-sharing service. Riders start and end rentals in an app. The same facts are needed in many shapes: a search box that finds stations with free bikes, a cache that answers "where is bike B-112?" in a millisecond, a warehouse where analysts compute average ride length, a model that tells the operations team where to send a van, and a service that emails a receipt when a ride ends. No single product is good at all five.</p>
+  <p>The way out is to be strict about which copy is the truth. A <strong>system of record</strong> holds the authoritative version of each fact, written once, normalized. Everything else is <strong>derived data</strong>: a search index, cache, aggregate, or model that you could throw away and recompute from the system of record<span class="sidenote"><em>derived data:</em> Redundant by design. Losing it costs time, not information.</span>. That distinction is not a property of any product. PostgreSQL can be a system of record in one design and a derived read model in another. What matters is the direction of the dataflow.</p>
+
+  <figure class="widget" id="dataflow">
+    <p class="widget-title">A dataflow builder</p>
+    <p class="widget-sub">Write events, switch derived systems on and off, then rebuild the search index while it keeps serving.</p>
+    <div class="btn-row">
+      <button class="btn primary" data-act="write">Write an event</button>
+      <button class="btn" data-act="auto" aria-pressed="false">Keep writing</button>
+      <button class="btn" data-act="rebuild">Rebuild search as v2</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="btn-row">
+      <span class="ch12-label">Derived systems</span>
+      <button class="btn" data-kind="search" aria-pressed="true">Search index</button>
+      <button class="btn" data-kind="cache" aria-pressed="true">Cache</button>
+      <button class="btn" data-kind="warehouse" aria-pressed="false">Warehouse</button>
+      <button class="btn" data-kind="model" aria-pressed="false">Rebalancing model</button>
+      <button class="btn" data-kind="notify" aria-pressed="false">Receipts</button>
+    </div>
+    <div class="scroll-x df"><svg viewBox="0 0 700 400" role="img" aria-label="The riders' app writes to the rides database. Its change log, in commit order, feeds each derived system, which applies the events with its own lag."></svg></div>
+    <ol class="steps">
+      <li>Start search v2 next to v1. It reads the log from offset 0 while v1 keeps serving reads.</li>
+      <li>v2 catches up with the head of the log and then processes new writes live, like v1.</li>
+      <li>Reads switch to v2. v1 keeps running, so switching back is still instant.</li>
+      <li>v1 is retired.</li>
+    </ol>
+    <div class="verdict"></div>
+    <figcaption>Each derived system consumes the same log in the same order, at its own pace. Blue dots are live events in transit; purple progress bars are replays of history.</figcaption>
+  </figure>
+
+  <h2>Write once, in order, and derive the rest</h2>
+  <p>The tempting way to feed five systems is to have the application write to all five. These <strong>dual writes</strong> fail in two ways. If the process crashes between the third and fourth write, the systems disagree permanently. Worse, two concurrent requests can reach the database in one order and the search index in the other, so each system ends up with a different last value, and nothing will ever notice.</p>
+  <p>The fix is to funnel all writes through a single place that decides their order, then let every other system follow that order. The change log of the database, exposed through change data capture<span class="sidenote">Debezium reads the PostgreSQL and MySQL replication logs and publishes each committed change to Kafka. Many teams instead write events to Kafka first and let the database be one of the consumers.</span>, or an event log written to first, gives each consumer the same sequence. Because each derived system is a deterministic function of that sequence, every one of them converges to the same answer. They may be stale, as the warehouse in the figure is for seconds at a time, but they never contradict each other once caught up.</p>
+  <p>Total order has limits. A single log is a single leader, and its throughput caps the whole system, so large deployments partition it, and events in different partitions have no defined order. Data centres in different regions usually each keep their own leader, so two regions can order the same pair of events differently. Microservices that each own their state have no shared log at all. And an order derived from arrival time can still violate causality: if a rider reports a bike broken and a mechanic then marks it fixed, a consumer that sees those on two unrelated partitions may process the fix first. Common mitigations are routing related events by the same key, giving events unique identifiers that later events can reference, or, where order cannot be guaranteed, designing the derived state so that application order does not matter.</p>
+
+  <h2>Derived data or distributed transactions</h2>
+  <p>Distributed transactions, such as two-phase commit across a database and a search engine, offer a different way to keep copies in step. They give linearizable reads: once the write commits, every system shows it. Log-based derivation gives asynchronous updates and eventual consistency, with no ability to read your own write in the index right away unless you build for it. In exchange it tolerates a slow or broken consumer without blocking writes, and it can be replayed. In practice XA transactions are rarely supported well across heterogeneous systems, and a fault anywhere amplifies into unavailability everywhere. For integrating different kinds of storage, a log with idempotent, deterministic consumers is usually the more robust choice, even though it asks you to think about staleness.</p>
+
+  <h2>Reprocessing to evolve an application</h2>
+  <p>Derived views are not frozen. Suppose the station search should now hide bikes that are flagged for repair. You cannot patch the existing index, because it never tracked flags. With the log retained, you can start a second version of the index that replays history from offset 0 with the new logic, while the first version keeps answering queries. When the new one has caught up, you shift reads to it, perhaps a few percent of users at a time, and retire the old one only when you are confident. Every step is reversible until the last one.</p>
+  <p>This is the same idea as a gradual schema migration, minus the riskiest part: the system of record is not rewritten in place. It works only if you keep enough history, which is why Kafka topics that feed derived views are often configured with long retention or log compaction, and why batch jobs over the full history in a data lake remain valuable even when everything else is streaming.</p>
+
+  <h2>Batch and stream together</h2>
+  <p>Replaying history is batch processing; following new writes is stream processing. For a while, a popular design ran both side by side: the <strong>lambda architecture</strong> recorded immutable events, a stream processor produced a fast approximate view, and a batch job later produced a corrected view that replaced it.</p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 230" role="img" aria-label="Left: the lambda architecture, where events feed a stream job and a separate batch job with two codebases, merged at read time. Right: one job reads the same log for both history and new events.">
+      <defs><marker id="li-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink-3)"/></marker></defs>
+      <text x="0" y="16" style="fill:var(--ink);font:600 14px var(--sans)">Lambda: two pipelines</text>
+      <g class="dg-node"><rect x="0" y="92" width="80" height="40" rx="6"/><text x="12" y="116">Events</text></g>
+      <g class="dg-node"><rect x="120" y="40" width="110" height="44" rx="6"/><text x="132" y="60">Stream job</text><text x="132" y="76" class="sub">code version A</text></g>
+      <g class="dg-node"><rect x="120" y="140" width="110" height="44" rx="6"/><text x="132" y="160">Batch job</text><text x="132" y="176" class="sub">code version B</text></g>
+      <g class="dg-node"><rect x="250" y="88" width="64" height="48" rx="6"/><text x="262" y="108">Merge</text><text x="262" y="124" class="sub">on read</text></g>
+      <g style="stroke:var(--ink-3);stroke-width:1.4;fill:none">
+        <path d="M82,104 L118,66" marker-end="url(#li-arr)"/><path d="M82,120 L118,158" marker-end="url(#li-arr)"/>
+        <path d="M232,66 L250,96" marker-end="url(#li-arr)"/><path d="M232,158 L250,128" marker-end="url(#li-arr)"/>
+      </g>
+      <text x="0" y="212" style="fill:var(--ink-3);font-size:12px">The same logic written twice, kept in sync by hand.</text>
+
+      <text x="360" y="16" style="fill:var(--ink);font:600 14px var(--sans)">Unified: one job, one log</text>
+      <g class="dg-node"><rect x="360" y="92" width="96" height="40" rx="6"/><text x="372" y="116">Event log</text></g>
+      <g class="dg-node active"><rect x="490" y="84" width="130" height="56" rx="6"/><text x="502" y="106">One job</text><text x="502" y="124" class="sub">replay, then follow</text></g>
+      <g style="stroke:var(--accent);stroke-width:1.4;fill:none">
+        <path d="M458,104 L488,104" marker-end="url(#li-arr)"/><path d="M458,120 L488,120" marker-end="url(#li-arr)"/>
+      </g>
+      <text x="360" y="168" style="fill:var(--ink-3);font-size:12px">History and new events flow through</text>
+      <text x="360" y="184" style="fill:var(--ink-3);font-size:12px">the same code, with event-time windows,</text>
+      <text x="360" y="200" style="fill:var(--ink-3);font-size:12px">so a replay gives the same answer.</text>
+    </svg>
+    </div>
+  </figure>
+
+  <p>Its weaknesses were practical. The same logic had to be written twice, in two frameworks, and kept equivalent. Merging the two outputs at read time was its own source of bugs. And the batch layer often had to reprocess everything each time, because incremental batch processing is hard. Modern engines such as Apache Flink, and Spark's structured streaming, close the gap by running one job over both the replayed history and the live tail. That needs three things: replaying the log from any offset, exactly-once semantics for state and output, and windowing by event time rather than processing time, so that a replay of last month gives the same result as last month's live run.</p>
+
+  <p class="book-ref">In the book: Chapter 12, "Data Integration" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch12-dataflow.js"></script>
+</body>
+</html>

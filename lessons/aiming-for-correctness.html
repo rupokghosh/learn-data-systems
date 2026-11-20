@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aiming for correctness · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch12.css">
+</head>
+<body data-lesson="aiming-for-correctness">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Aiming for correctness</h1>
+  </header>
+
+  <p>A stateless service that misbehaves can be restarted and the problem is gone. A stateful system that misbehaves keeps the damage: a wrong balance, a duplicate order, a seat sold twice. For decades the standard answer has been transactions, and they remain a fine tool. But the guarantees a database offers end at its own boundary, and many correctness failures happen just outside it.</p>
+
+  <h2>The end-to-end argument</h2>
+  <p>Lena is paying €40 for a place in a pottery class. Her browser sends the request, the app server runs a serializable transaction that inserts a payment row, the transaction commits, and the reply is lost on the way back. Lena sees an error and clicks Pay again. The second request is a new HTTP request, handled by a new transaction, which commits a second row. Every component did exactly what it promised: TCP delivered bytes without duplication, the database committed atomically, a stream processor downstream may even guarantee exactly-once processing. None of that helps, because none of those layers can tell that two different requests represent one intention.</p>
+
+  <figure class="widget" id="e2e">
+    <p class="widget-title">Pay once, even when the network fails</p>
+    <p class="widget-sub">Choose where things go wrong, then decide whether an operation ID travels from the form to the database.</p>
+    <div class="btn-row">
+      <button class="btn" data-fault="none" aria-pressed="false">No failure</button>
+      <button class="btn" data-fault="request" aria-pressed="false">Request lost</button>
+      <button class="btn" data-fault="response" aria-pressed="true">Reply lost</button>
+      <button class="btn" data-fault="crash" aria-pressed="false">Server crashes</button>
+      <button class="btn" data-fault="double" aria-pressed="false">Double click</button>
+    </div>
+    <div class="btn-row">
+      <label class="btn check"><input type="checkbox" id="e2e-id"> Operation ID end to end</label>
+      <button class="btn primary" data-act="play">Play</button>
+      <button class="btn" data-act="step">Step</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="seq-wrap">
+      <div class="seq"><svg role="img" aria-label="Sequence diagram of messages between browser, app server, and database"></svg></div>
+      <div>
+        <p class="lane-label">payments table</p>
+        <table class="db-rows"><thead><tr><th>id</th><th>amount</th><th>op_id</th></tr></thead><tbody></tbody></table>
+        <div class="stats"><div class="stat"><div class="stat-label">Charged to Lena</div><div class="stat-value" data-out="charged"></div></div></div>
+      </div>
+    </div>
+    <p class="seq-now"></p>
+    <div class="verdict" hidden></div>
+  </figure>
+
+  <p>The fix has to span the whole path, which is the <strong>end-to-end argument</strong> applied to data: a guarantee can only be fully implemented with the knowledge held at the endpoints. Generate a unique operation ID when the checkout form is rendered, send it with every attempt, and let the database reject a second use of it:</p>
+<pre><code>CREATE TABLE payments (
+  op_id    text PRIMARY KEY,      -- minted with the form, reused by every retry
+  learner  text NOT NULL,
+  amount   numeric(8,2) NOT NULL
+);
+
+INSERT INTO payments (op_id, learner, amount)
+VALUES ('op-5c1e', 'lena', 40.00)
+ON CONFLICT (op_id) DO NOTHING;  -- a retry becomes a no-op</code></pre>
+  <p>Any lower-level deduplication is still useful for performance, but the ID is what makes the operation idempotent from the user's point of view. Stripe's API exposes the same idea as an idempotency key header, and the pattern applies to any request that a person or a client library might repeat.</p>
+
+  <h2>Enforcing constraints through a log</h2>
+  <p>Uniqueness is the classic constraint that seems to demand coordination. Two people trying to claim the handle <span class="mono">@tide</span> at the same moment must not both succeed. A log offers a way to get this without distributed locks: send every claim for a given handle to the same log partition, chosen by hashing the handle, and let a single-threaded processor consume that partition in order. The first claim it sees wins; later ones are rejected. Because the log order is the same for every reader, the decision is deterministic and can be recomputed after a crash.</p>
+
+  <figure class="widget" id="claims">
+    <p class="widget-title">Claiming a handle</p>
+    <p class="widget-sub">Four people claim overlapping handles within 150 ms of each other. Compare a partitioned log with check-then-insert.</p>
+    <div class="btn-row">
+      <button class="btn" data-mode="log" aria-pressed="true">Partitioned log</button>
+      <button class="btn" data-mode="check" aria-pressed="false">Check, then insert</button>
+      <button class="btn primary" data-act="play">Play</button>
+      <button class="btn" data-act="step">Step</button>
+      <button class="btn" data-act="seed">New network delays</button>
+    </div>
+    <p class="clients"></p>
+    <div class="claims-grid">
+      <div class="claim-lanes"></div>
+      <div>
+        <p class="lane-label">Owners</p>
+        <table class="owners"><tbody></tbody></table>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Claims arrived</div><div class="stat-value" data-out="claims"></div></div>
+      <div class="stat"><div class="stat-label">Granted</div><div class="stat-value" data-out="granted"></div></div>
+      <div class="stat"><div class="stat-label">Rejected</div><div class="stat-value" data-out="rejected"></div></div>
+      <div class="stat"><div class="stat-label">Handles with two owners</div><div class="stat-value" data-out="dups"></div></div>
+    </div>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>The same trick scales to requests that touch several partitions, without an atomic commit across them. Say a booking reserves a seat in one partition and charges a gift card held in another. First append the whole request, with its ID, to a single log partition. A stream processor reads it and emits two derived instructions, one to the seat's partition and one to the gift card's partition, each carrying the request ID. Each partition applies its instruction and ignores a repeat of an ID it has already seen. If the processor crashes halfway, it rereads the request and emits the instructions again, and deduplication makes that harmless. Atomicity comes from the request being logged once; everything after it is a deterministic derivation.</p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 170" role="img" aria-label="A booking request is logged once, then a processor derives one instruction for the seats partition and one for the gift card partition, each deduplicated by request ID.">
+      <defs><marker id="mp-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink-3)"/></marker></defs>
+      <g class="dg-node active"><rect x="0" y="58" width="140" height="52" rx="6"/><text x="12" y="80">Request log</text><text x="12" y="98" class="sub">book-91: seat + €25</text></g>
+      <g class="dg-node"><rect x="200" y="58" width="130" height="52" rx="6"/><text x="212" y="80">Processor</text><text x="212" y="98" class="sub">deterministic</text></g>
+      <g class="dg-node"><rect x="420" y="10" width="220" height="52" rx="6"/><text x="432" y="32">Seats partition</text><text x="432" y="50" class="sub">hold seat 7 (book-91), once</text></g>
+      <g class="dg-node"><rect x="420" y="106" width="220" height="52" rx="6"/><text x="432" y="128">Gift cards partition</text><text x="432" y="146" class="sub">debit €25 (book-91), once</text></g>
+      <g style="stroke:var(--ink-3);stroke-width:1.4;fill:none">
+        <path d="M142,84 L196,84" marker-end="url(#mp-arr)"/>
+        <path d="M332,76 C376,76 380,36 416,36" marker-end="url(#mp-arr)"/>
+        <path d="M332,92 C376,92 380,132 416,132" marker-end="url(#mp-arr)"/>
+      </g>
+    </svg>
+    </div>
+  </figure>
+
+  <h2>Timeliness and integrity</h2>
+  <p>"Consistency" usually bundles two different properties. <strong>Timeliness</strong> means a reader sees an up-to-date state; a stale read violates it, but the violation fixes itself once the reader waits and reads again. <strong>Integrity</strong> means the data is not corrupt and no record is missing, contradictory, or duplicated; a violation stays until someone repairs it. The double charge above is an integrity failure. A gift card balance that shows the old amount for half a second is only a timeliness failure.</p>
+  <p>In most applications integrity matters far more. ACID transactions provide both at once, which is convenient but expensive across partitions. Log-based dataflow separates them: with deterministic derivation, end-to-end request IDs, and immutable events, integrity holds even though derived views lag. You can then add timeliness back where users need it, for example by having the client wait for its own request to be processed before showing the result.</p>
+
+  <h2>Loose constraints and apologies</h2>
+  <p>Many business constraints are softer than they look. A pottery class with twelve wheels may occasionally get a thirteenth booking; the studio apologizes, offers a later slot or a refund, and moves on. Businesses already handle oversold flights, out-of-stock items, and bounced payments with compensating actions, because physical reality violates constraints that software cannot see. If the cost of an apology is low, you can check the constraint asynchronously, after accepting the write, and compensate in the rare cases it fails.</p>
+  <p>Combining the pieces gives <strong>coordination-avoiding</strong> data systems: integrity preserved through logs and idempotence, constraints enforced asynchronously where an apology is acceptable, and synchronous coordination kept for the few places where a violation would be too costly to repair. Such systems can span regions and keep working through network partitions, with much less of the latency and fragility of distributed transactions.</p>
+
+  <h2>Trust, but verify</h2>
+  <p>Every guarantee rests on assumptions: that disks return what was written, that the database has no bugs, that operators do not run the wrong migration. Each of those fails sometimes. Mature storage systems such as HDFS and Amazon S3 continuously read back stored data and compare replicas to catch silent corruption. Applications deserve the same habit. Periodically recompute a derived view from the log and compare it with the live one. Check that the sum of all ledger entries matches the balances table. Restore a backup to a scratch environment and query it.</p>
+  <p>Event-based designs make this easier, because an immutable log plus deterministic derivation lets you replay and diff. Designing for auditability means being able to answer "why does this row have this value?" by pointing at the events that produced it. Cryptographic structures go further: Merkle trees and append-only signed logs, as used in certificate transparency, let outsiders check that history was not rewritten.</p>
+
+  <p class="book-ref">In the book: Chapter 12, "Aiming for Correctness" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch12-e2e.js"></script>
+<script type="module" src="/assets/widgets/ch12-claims.js"></script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doing the right thing · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch12.css">
+</head>
+<body data-lesson="doing-the-right-thing">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Doing the right thing</h1>
+  </header>
+
+  <p>Most of the data in the systems this site describes is about people: what they bought, where they went, whom they messaged, how long they looked at a screen. The engineering choices in earlier lessons, what to store, how long to keep it, what to derive from it, are also choices about those people. They deserve the same care we give to latency and fault tolerance, and the people building the systems are often the best placed to see the consequences early.</p>
+
+  <h2>Predictions that decide</h2>
+  <p>Predictive models increasingly decide who gets a loan, an interview, an insurance quote, or extra scrutiny at a border. Being wrong about a product recommendation costs a click. Being wrong about a person can lock them out of housing or work, and they rarely get to see the reasoning or appeal it.</p>
+  <p>A model trained on historical decisions learns the patterns in that history, including its prejudice. Removing a protected attribute such as ethnicity from the inputs does not remove the bias, because other features act as <strong>proxies</strong>: postcode, first language, the shop where someone buys groceries. The model is then accurate in the narrow sense of reproducing the past, which is the problem. A model also tends to have its lowest accuracy for the groups that are least represented in its training data.</p>
+  <p>Accountability is the other gap. When a person makes a bad decision there is someone to ask and a process to appeal to. When a scoring service does, the answer is often "the system said so". If you build such a system, design for recourse from the start: log the inputs and model version behind each decision, make explanations possible, give people a way to see and correct the data held about them, and measure outcomes per group rather than only in aggregate.</p>
+
+  <h2>Feedback loops</h2>
+  <p>The hardest failures appear when a model's decisions shape the data it later learns from. Consider a lender scoring applicants from two neighbourhoods, Northgate and Southmere. In this simulation every person has the same distribution of true reliability in both places; the only difference is that many Southmere residents start with thinner credit files. The score rewards file length and an area weight. People who are approved and repay add to their file. People who are denied add nothing, so their score never improves.</p>
+
+  <figure class="widget" id="feedback">
+    <p class="widget-title">A score that feeds on its own decisions</p>
+    <p class="widget-sub">400 applicants per neighbourhood reapply each round. Change the threshold, the retraining, and how many denied applicants get a small trial loan.</p>
+    <div class="controls">
+      <div class="control"><label for="fb-thr">Approval threshold (score out of 100) <output></output></label><input id="fb-thr" type="range" min="30" max="70" step="1" value="50"></div>
+      <div class="control"><label for="fb-exp">Trial loans for denied applicants <output></output></label><input id="fb-exp" type="range" min="0" max="20" step="1" value="0"></div>
+    </div>
+    <div class="btn-row">
+      <label class="btn check"><input type="checkbox" id="fb-learn" checked> Model retrains on its own decisions</label>
+    </div>
+    <div class="chart"></div>
+    <div class="legend"><span><i style="background:var(--accent)"></i>Northgate approval rate</span><span><i style="background:var(--orange)"></i>Southmere approval rate</span></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Gap in round 1</div><div class="stat-value" data-out="gap0"></div></div>
+      <div class="stat"><div class="stat-label">Gap in round 20</div><div class="stat-value" data-out="gap1"></div></div>
+      <div class="stat"><div class="stat-label">Reliable Southmere applicants denied, round 20</div><div class="stat-value sm" data-out="denied"></div></div>
+      <div class="stat"><div class="stat-label">True repayment rate, N / S</div><div class="stat-value sm" data-out="repay"></div></div>
+    </div>
+    <div class="verdict"></div>
+    <figcaption>Retraining here makes a common mistake: the model refits each area's weight on repayments observed among all applicants, so people it denied count as if they had failed to repay. "Reliable" means a true repayment probability of at least 80%.</figcaption>
+  </figure>
+
+  <p>Two mechanisms are at work. Denied people cannot generate the evidence that would change the decision, so the first round's judgement becomes self-fulfilling. And a model retrained on outcomes it caused mistakes the absence of data for evidence of risk. Raising or lowering the threshold moves both lines but does not fix the shape. What helps is breaking the loop: approving a random share of borderline cases to keep learning, labelling outcomes only where they were actually observed, and monitoring outcome gaps over time rather than accuracy at one point in time. Systems thinking, asking what the system's outputs do to its future inputs, belongs in the design review alongside capacity planning.</p>
+
+  <h2>Privacy and tracking</h2>
+  <p>When a user explicitly sends data so a service can act on it, such as an address for a delivery, the service works for the user. When the service records behaviour the user never chose to share, to sell ads or to profile, the relationship changes: the user becomes the subject of the system rather than its client. It helps to describe a feature in plain words and see whether it still sounds acceptable: "the app records every place a customer visits, keeps it indefinitely, and uses it to decide which offers they see" is an accurate description of many loyalty programmes, and it reads very differently from "personalized rewards".</p>
+  <p>Consent is the usual defence, and it is weak. Few people read the terms, fewer understand what can be inferred from their data, and opting out of a service that everyone else uses carries a real social and economic cost. Privacy does not mean keeping everything secret; it means the person decides what to reveal to whom. Large-scale tracking moves that decision from the individual to the company. Data collected for one purpose is also an asset that can be sold, breached, subpoenaed, or inherited by a less careful owner in an acquisition, so it carries risk long after its original use has ended.</p>
+
+  <h2>Anonymous is harder than it looks</h2>
+  <p>A common reassurance is that shared or published data is anonymized: names and email addresses removed. The trouble is that combinations of ordinary attributes, called quasi-identifiers, are surprisingly unique. The figure uses a synthetic population of 20,000 app users with realistic skew: a few large postcode areas, a handful of popular phones, one dominant language.</p>
+
+  <figure class="widget" id="reident">
+    <p class="widget-title">How many people share your combination?</p>
+    <p class="widget-sub">Release attributes one at a time and watch the crowd each person hides in shrink.</p>
+    <div class="btn-row">
+      <label class="btn check"><input type="checkbox" data-attr="postcode" checked> Postcode prefix</label>
+      <label class="btn check"><input type="checkbox" data-attr="year"> Birth year</label>
+      <label class="btn check"><input type="checkbox" data-attr="gender"> Gender</label>
+      <label class="btn check"><input type="checkbox" data-attr="device"> Phone model</label>
+      <label class="btn check"><input type="checkbox" data-attr="lang"> App language</label>
+    </div>
+    <p class="lane-label">Everyone, by the size of the group sharing their combination</p>
+    <div class="anon-bar"></div>
+    <div class="legend"></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Unique in the dataset</div><div class="stat-value" data-out="unique"></div></div>
+      <div class="stat"><div class="stat-label">In a group under 5</div><div class="stat-value" data-out="small"></div></div>
+      <div class="stat"><div class="stat-label">Distinct combinations</div><div class="stat-value" data-out="groups"></div></div>
+    </div>
+    <p class="lane-label" style="margin-top:18px">Following one person <button class="link-btn" data-act="next">another person</button></p>
+    <ol class="anon-steps"></ol>
+    <div class="verdict"></div>
+  </figure>
+
+  <p>Postcode alone hides everyone in a crowd of dozens. Add birth year and a few percent are unique; add phone model and most are. Real datasets are worse, since they also contain timestamps and locations, which are among the most identifying data there is. Techniques such as k-anonymity, aggregation, and differential privacy help, but they need to be designed in, with the attacker's side knowledge in mind, not added as a find-and-replace on the name column.</p>
+
+  <h2>Legislation, self-regulation, and keeping less</h2>
+  <p>The first industrial revolution brought enormous gains along with child labour, polluted rivers, and dangerous factories, and it took decades of regulation to keep the gains while limiting the harm. Data collection may be at a similar stage. Laws such as the EU's GDPR and California's CCPA set some limits: a stated purpose for processing, a right to access and delete, and an expectation that data is not kept longer than needed. They run against a "collect everything, we may need it later" culture, and engineers inside companies are a large part of how that culture changes.</p>
+  <p>Practical habits go a long way. Collect only what a feature needs, and write down why. Aggregate or coarsen early: a birth year instead of a birth date, a city instead of a coordinate. Set retention periods and enforce them in code, with TTLs on tables and lifecycle rules on object storage. Remember that immutable logs and backups keep data too; encrypting each person's records with a per-person key and deleting the key, sometimes called crypto-shredding, makes deletion possible even where data cannot be rewritten. Treat the people in your datasets as you would want your own data treated, and build systems you would be comfortable explaining to them.</p>
+
+  <p class="book-ref">In the book: Chapter 12, "Doing the Right Thing" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch12-feedback.js"></script>
+<script type="module" src="/assets/widgets/ch12-reident.js"></script>
+</body>
+</html>

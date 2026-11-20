@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unbundling databases · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch12.css">
+</head>
+<body data-lesson="unbundling-databases">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Unbundling databases</h1>
+  </header>
+
+  <p>Unix and the relational database both set out to help people manage data, and they took opposite routes. Unix gives you small, sharp tools and a thin, low-level abstraction, the stream of bytes, to connect them with pipes. A relational database gives you one large tool and a high-level abstraction, the declarative query, behind which the system chooses indexes, join algorithms, and replication without your involvement. One trusts the programmer to compose; the other hides the composition. Much of modern data infrastructure is an attempt to get the strengths of both.</p>
+
+  <h2>A database is already a dataflow system</h2>
+  <p>Look inside a database and you find derived data everywhere. Running <code>CREATE INDEX</code> makes the database scan the table, build a sorted copy of one column with pointers back to rows, and then keep that copy up to date on every write. A materialized view is a stored query result maintained the same way. A follower replica is a copy built by replaying the leader's log. A full-text index in PostgreSQL or Elasticsearch is a derived inverted index. Each is a function from the primary data to another shape, and the database runs the dataflow for you, transactionally.</p>
+  <p>The catch is that the dataflow stops at the database's edge. If your search lives in Elasticsearch and your analytics in a warehouse, the database cannot maintain them. Two broad answers have emerged:</p>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 210" role="img" aria-label="Federated: one query layer reads from several stores. Unbundled: one ordered log of writes feeds several stores.">
+      <defs><marker id="ub-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink-3)"/></marker></defs>
+      <text x="0" y="16" style="fill:var(--ink);font:600 14px var(--sans)">Federated: unify the reads</text>
+      <g class="dg-node active"><rect x="0" y="36" width="270" height="36" rx="6"/><text x="12" y="59">One query interface</text></g>
+      <g class="dg-node"><rect x="0" y="130" width="80" height="36" rx="6"/><text x="12" y="153">Postgres</text></g>
+      <g class="dg-node"><rect x="95" y="130" width="80" height="36" rx="6"/><text x="107" y="153">Search</text></g>
+      <g class="dg-node"><rect x="190" y="130" width="80" height="36" rx="6"/><text x="202" y="153">Files</text></g>
+      <g style="stroke:var(--ink-3);stroke-width:1.4">
+        <line x1="40" y1="74" x2="40" y2="126" marker-end="url(#ub-arr)"/><line x1="135" y1="74" x2="135" y2="126" marker-end="url(#ub-arr)"/><line x1="230" y1="74" x2="230" y2="126" marker-end="url(#ub-arr)"/>
+      </g>
+      <text x="0" y="196" style="fill:var(--ink-3);font-size:12px">Each store is still written separately.</text>
+
+      <text x="350" y="16" style="fill:var(--ink);font:600 14px var(--sans)">Unbundled: unify the writes</text>
+      <g class="dg-node active"><rect x="350" y="36" width="270" height="36" rx="6"/><text x="362" y="59">One ordered log of writes</text></g>
+      <g class="dg-node"><rect x="350" y="130" width="80" height="36" rx="6"/><text x="362" y="153">Postgres</text></g>
+      <g class="dg-node"><rect x="445" y="130" width="80" height="36" rx="6"/><text x="457" y="153">Search</text></g>
+      <g class="dg-node"><rect x="540" y="130" width="80" height="36" rx="6"/><text x="552" y="153">Cache</text></g>
+      <g style="stroke:var(--accent);stroke-width:1.4">
+        <line x1="390" y1="74" x2="390" y2="126" marker-end="url(#ub-arr)"/><line x1="485" y1="74" x2="485" y2="126" marker-end="url(#ub-arr)"/><line x1="580" y1="74" x2="580" y2="126" marker-end="url(#ub-arr)"/>
+      </g>
+      <text x="350" y="196" style="fill:var(--ink-3);font-size:12px">Each store is read in its own way.</text>
+    </svg>
+    </div>
+  </figure>
+
+  <p>A <strong>federated</strong> database, or polystore, offers one query interface over many storage engines: PostgreSQL's foreign data wrappers and engines such as Trino let a single SQL query join a table with a file in object storage. That unifies reads, but it does nothing to keep the stores consistent with each other when data changes. An <strong>unbundled</strong> design unifies writes instead: changes flow through an ordered log, and each store subscribes and maintains its own derived view. That is the database's internal index maintenance, pulled apart and spread across a data centre, with Kafka playing the role of the replication log and each consumer playing the role of an index.</p>
+  <p>Unbundling is not a reason to replace a database that already does what you need. A single PostgreSQL instance with good indexes beats a fleet of specialized systems on simplicity, and simplicity is worth a lot. The goal is breadth: when no single product covers your workloads, you can compose several without falling back on fragile dual writes. The composition is where the complexity lives, so it should be as boring and as well-tested as possible<span class="sidenote">The log consumers need the same care as any database component: idempotent apply, monitoring of lag, and a tested path for rebuilding from scratch.</span>.</p>
+
+  <h2>Application code as a derivation function</h2>
+  <p>Once you think in derived datasets, a lot of application code turns out to be a function from one dataset to another. A machine learning feature pipeline, a search indexer that lowercases and stems words, a job that turns order events into a stock-level table: each takes input data and produces derived data. Databases are good at a narrow set of such functions (indexes, views, triggers) and bad at running arbitrary code with its own dependencies and deployment cycle. Stream processors such as Flink and Kafka Streams fill that gap: they run your code as the derivation function, with the log as input and a store as output.</p>
+  <p>This suggests keeping application code stateless and putting state in purpose-built stores, a split web applications already practise. The usual arrangement is still request and response: the code asks the database a question and waits. The dataflow alternative inverts it. Suppose a food delivery service quotes an arrival time on every order, and the quote depends on each kitchen's current preparation time. Instead of calling the kitchen service synchronously for every quote, the ordering service subscribes to the stream of preparation-time changes and keeps a local table. Quoting then becomes a local lookup, faster and unaffected when the kitchen service is down, at the price of a figure that may be a few seconds old. The time dependence becomes explicit, too: the order can record which version of the preparation time it used.</p>
+
+  <h2>Moving the boundary between writes and reads</h2>
+  <p>Every derived view divides work into two halves. The <strong>write path</strong> is the precomputation that happens eagerly when data comes in. The <strong>read path</strong> is the work that happens lazily when someone asks. Indexes, caches, and materialized views are all ways to move that boundary: they shift work from read time to write time, and pay for it in write amplification, storage, and the delay before a write becomes visible.</p>
+  <p>Consider a "trending near you" panel in a second-hand marketplace: listings ranked by how many people saved them, within a few blocks of the viewer. The figure runs a simulated two-minute workload of 3,000 listings, 1,200 users, and ten saves per second against five designs and counts the records each one touches.</p>
+
+  <figure class="widget" id="paths">
+    <p class="widget-title">Where should the work happen?</p>
+    <p class="widget-sub">Move the boundary, then change how often people look compared with how often they save.</p>
+    <div class="controls">
+      <div class="control"><label for="wr-design">Design <output></output></label><input id="wr-design" type="range" min="0" max="4" step="1" value="0"></div>
+      <div class="control"><label for="wr-ratio">Page views <output></output></label><input id="wr-ratio" type="range" min="0" max="6" step="1" value="2"></div>
+    </div>
+    <div class="wr-strip"></div>
+    <div class="wr-axis"><span class="w">blue: done when a listing is saved</span><span class="r">orange: done when the page is read</span></div>
+    <p class="wr-desc"></p>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Records per save</div><div class="stat-value" data-out="perWrite"></div></div>
+      <div class="stat"><div class="stat-label">Records per page view</div><div class="stat-value" data-out="perRead"></div></div>
+      <div class="stat"><div class="stat-label">Total work</div><div class="stat-value" data-out="total"></div></div>
+      <div class="stat"><div class="stat-label">Views missing a recent save</div><div class="stat-value" data-out="stale"></div></div>
+      <div class="stat"><div class="stat-label">Worst-case age</div><div class="stat-value" data-out="age"></div></div>
+      <div class="stat"><div class="stat-label">Records stored</div><div class="stat-value" data-out="storage"></div></div>
+    </div>
+    <p class="note">Total records touched per second, all five designs, at this read rate (log scale):</p>
+    <div class="chart"></div>
+    <div class="verdict"></div>
+    <figcaption>Counts come from running the same seeded workload through each design. Staleness is measured: a view counts as missing a save if the true ranking for that area changed after the version the reader was shown.</figcaption>
+  </figure>
+
+  <p>No position is right in general. With few readers, scanning or a good index is cheapest and always fresh. As reads grow, moving the ranking to the write path wins by orders of magnitude, and a stream processor can keep each area's top list current within half a second. A time-based cache sits awkwardly in between: cheap to add, but its staleness is chosen by a timer rather than by how quickly changes actually propagate. The search index, the cache, and the materialized view are the same idea at different points on one line.</p>
+
+  <h2>Pushing state to clients, and reads as events</h2>
+  <p>The write path traditionally stops at the server: the browser fetches a page, and the data on it goes stale the moment it renders. Mobile apps that work offline already break this, holding a local copy of state and syncing later. Push protocols such as WebSockets and server-sent events let the server send each change as it happens, so the client becomes one more subscriber to the log, and the end of the write path is the user's screen. Reactive front-end state libraries and replicated client-side databases follow the same model. A client that disconnects can resume from its last seen offset, the way a Kafka consumer does.</p>
+  <p>Taken further, reads can be events too. If a read request is written to a stream and joined with the derived state by a stream processor, the system records who saw what, and when. That is useful for causality ("the buyer saw price 42 before buying") and for multi-partition queries routed through the same infrastructure as writes. It costs storage and latency, so it fits where the record of reads matters, not everywhere.</p>
+
+  <p class="book-ref">In the book: Chapter 12, "Unbundling Databases" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch12-paths.js"></script>
+</body>
+</html>
