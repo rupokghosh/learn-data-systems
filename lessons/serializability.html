@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serializability · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch7.css">
+</head>
+<body data-lesson="serializability">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Serializability</h1>
+  </header>
+
+  <p>The previous lessons collected a catalogue of anomalies, each with its own partial fix. Keeping that catalogue in your head while writing every transaction is hard, and static analysis cannot reliably tell you which of your code paths are exposed. Serializable isolation removes the question. It guarantees that the result of running transactions concurrently is the same as running them one at a time, in some order, so any transaction that is correct on its own stays correct under concurrency.</p>
+
+  <p>Databases provide this in one of three ways: by actually running one transaction at a time, by two-phase locking, or by optimistic checking as in serializable snapshot isolation.</p>
+
+  <h2>Actually running one at a time</h2>
+  <p>The most direct approach is to drop concurrency: a single thread executes transactions one after another. For decades this was considered too slow, but two things changed. Memory became cheap enough to hold many working datasets entirely in RAM, so a transaction never waits for disk. And designers noticed that transactions in online systems are usually short and touch few rows. VoltDB, Redis, and Datomic all execute writes serially, and a single thread without locking overhead can sometimes beat a concurrent engine.</p>
+
+  <p>The catch is that a transaction must never leave the thread idle. An interactive transaction, where the application sends a query, waits for the answer, thinks, and sends the next, would hold the single thread hostage for network round trips. So serial systems require the whole transaction to be submitted up front as a stored procedure. Stored procedures have a poor reputation, because traditional vendor languages are awkward to test, version, and debug, but VoltDB uses Java and Redis uses Lua, which helps.</p>
+
+  <p>Throughput is capped at one CPU core. To go further you partition the data so each partition has its own thread, which works only if most transactions touch a single partition. A transaction that spans partitions needs all of them to coordinate, and runs much slower. Serial execution fits when transactions are short, the active data fits in memory, the write rate fits one core per partition, and cross-partition work is rare.</p>
+
+  <h2>Two-phase locking</h2>
+  <p>For around thirty years, two-phase locking (2PL) was the main way to get serializability, and it is still what MySQL's InnoDB and SQL Server use at the serializable level. Its rule is stricter than the row locks of read committed: a reader takes a shared lock on everything it reads, and a writer takes an exclusive lock. Several transactions can share a shared lock, but an exclusive lock excludes everyone. A transaction that read a row and now wants to write it upgrades its lock. All locks are held until commit or abort. The two phases are growing, while locks are acquired, and shrinking, when they are all released at the end.</p>
+
+  <p>So writers block readers and readers block writers, the opposite of snapshot isolation's promise. Transactions also end up waiting for each other in circles: each holds a lock the other needs. The database watches a wait-for graph, and when it finds a cycle it aborts one transaction so the others can continue. That deadlock is not a bug in your application; it is a normal outcome that the application must handle by retrying.</p>
+
+  <p>Locking individual rows is not enough to stop phantoms, because the row that would conflict does not exist yet. A predicate lock locks every object that matches a search condition, including ones inserted later, but checking every write against every active predicate is slow. Real systems approximate it with index-range locks: the transaction locks a range of an index that covers its condition, perhaps more than strictly necessary. Without a suitable index, the database falls back to locking the whole table.<span class="sidenote">InnoDB calls its version next-key locking: it locks an index record and the gap before it.</span></p>
+
+  <figure class="widget" id="lab-serial">
+    <p class="widget-title">The same workload under 2PL and SSI</p>
+    <p class="widget-sub">Run the lifeguard workload interleaved under two-phase locking to trigger a deadlock, then switch to SSI and run it again.</p>
+    <div class="lab-mount"></div>
+    <figcaption>Under two-phase locking, counting the guards takes a shared range lock on <span class="mono">guard:*</span>, which blocks any write inside that range. Under SSI, reads take no locks; the arrows record which transaction read data that another later overwrote.</figcaption>
+  </figure>
+
+  <p>The cost of 2PL is not only the deadlocks. Waiting is unbounded: one slow transaction holding a lock on a popular row stalls every transaction behind it, and they stall the ones behind them. Even at modest load, response times at high percentiles can be erratic.</p>
+
+  <h2>Serializable snapshot isolation</h2>
+  <p>Serializable snapshot isolation (SSI), first described in 2008 and available in PostgreSQL since version 9.1, takes the opposite bet. Two-phase locking is pessimistic: if something might go wrong, wait. SSI is optimistic: let every transaction run on its snapshot without blocking, and at commit time check whether something went wrong. If it did, abort.</p>
+
+  <p>What goes wrong under snapshot isolation is a decision based on a premise that has since become false: "two guards are on duty" was true in the snapshot but no longer true at commit. SSI tracks two situations in which a premise may be outdated:</p>
+  <ul>
+    <li><strong>Stale reads.</strong> A transaction read a version while ignoring a newer, uncommitted write by another transaction. If that other transaction commits first, what the reader saw is out of date.</li>
+    <li><strong>Writes that affect earlier reads.</strong> A transaction writes data that another, concurrent transaction has already read. SSI records reads much like index-range locks, but these markers never block anyone; they only flag the conflict.</li>
+  </ul>
+
+  <p>Each case is a read-write conflict between two transactions. One conflict alone is harmless: the reader can be placed before the writer in the serial order. Trouble needs a pivot, a transaction with a conflict coming in and a conflict going out, where the far end has already committed. PostgreSQL looks for this structure and aborts one of the transactions involved, usually the one trying to commit. That rules out every anomaly, at the cost of some aborts that were not strictly necessary.</p>
+
+  <p>Because readers never block, SSI handles read-heavy workloads and long read-only queries well. Its weak spot is the opposite of 2PL's: under high contention many transactions do work that is then thrown away and retried, and the retries add load.</p>
+
+  <h2>Contention decides</h2>
+  <p>To compare the two, the simulation below runs thousands of short transactions through the same engine as the lab above. Some are read-only reports, the rest read a row for update, read another, and write. Shrinking the number of rows they pick from raises contention.</p>
+
+  <figure class="widget" id="contention">
+    <p class="widget-title">Blocking against aborting</p>
+    <p class="widget-sub">Each point is an 800-tick simulation. Change the number of clients and the share of read-only transactions.</p>
+    <div class="controls">
+      <div class="control"><label for="sim-clients">Concurrent clients <output></output></label><input id="sim-clients" type="range" min="2" max="16" step="2" value="8"></div>
+      <div class="control"><label for="sim-ro">Read-only transactions <output></output></label><input id="sim-ro" type="range" min="0" max="0.9" step="0.1" value="0.5"></div>
+    </div>
+    <div class="charts3">
+      <div><p class="lab-h"></p><div class="chart"></div></div>
+      <div><p class="lab-h"></p><div class="chart"></div></div>
+      <div><p class="lab-h"></p><div class="chart"></div></div>
+    </div>
+    <div class="legend"><span><i style="background:var(--orange)"></i>Two-phase locking</span><span><i style="background:var(--accent)"></i>Serializable snapshot isolation</span></div>
+    <p class="note">Horizontal axis: how many rows the transactions pick from, on a log scale. Fewer rows means more conflicts.</p>
+    <div class="verdict"></div>
+    <figcaption>Every client runs one operation per tick. A blocked client does nothing; an aborted transaction retries after a short random pause, and its latency counts from its first attempt. Writes take row locks under both schemes, so SSI clients can also wait briefly for another writer.</figcaption>
+  </figure>
+
+  <p>Both schemes do well when conflicts are rare and badly when every transaction fights over the same few rows; no algorithm makes a hot row cheap. The difference is in how they fail. Under 2PL, contention shows up as waiting and deadlocks, and readers suffer along with writers. Under SSI, it shows up as aborted work, while read-only transactions sail through. Raise the read-only share and SSI pulls ahead.</p>
+
+  <p>In practice: if your transactions are short, your data fits in memory, and you can partition by the key most transactions use, serial execution is simple and fast. If you need a general-purpose database, prefer one that offers serializable snapshot isolation, keep transactions short so the window for conflicts stays small, and write the retry loop once, carefully, for every transaction.</p>
+
+  <p class="book-ref">In the book: Chapter 7, "Serializability" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch7-serial.js"></script>
+</body>
+</html>

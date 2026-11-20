@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Read committed and snapshot isolation · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch7.css">
+</head>
+<body data-lesson="read-committed-snapshot">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Read committed and snapshot isolation</h1>
+  </header>
+
+  <p>Two transactions that touch different data can run side by side without any trouble. Problems start when one reads data that another is changing, or when both change the same data. Serializable isolation would make all of this disappear, but most databases run at a weaker level by default because it is cheaper. Weaker levels are not vague: each one rules out a specific list of anomalies and allows the rest. This lesson covers the two levels you are most likely to be running on right now.</p>
+
+  <h2>Read committed</h2>
+  <p>Read committed makes two promises. First, no dirty reads: a transaction only ever sees data that other transactions have committed. Second, no dirty writes: a transaction never overwrites data that another transaction has written but not yet committed.</p>
+
+  <p>Dirty reads matter for two reasons. A reader could see some of a transaction's writes but not others, such as a seat marked sold with no matching invoice. Worse, it could see a write that is later rolled back, so it acts on data that, as far as the database is concerned, never existed. Dirty writes matter because transactions that update several rows can interleave their writes, leaving each row with a different winner.</p>
+
+  <p>Databases prevent dirty writes with row-level locks: before modifying a row, a transaction takes an exclusive lock on it and holds the lock until it commits or aborts. A second writer waits. Reads do not take that lock, because one long-running write would then stall every reader of that row. Instead, the database keeps the last committed value next to the uncommitted one and gives readers the committed value until the writer commits. Read committed is the default in PostgreSQL, Oracle, and SQL Server.</p>
+
+  <figure class="widget" id="lab-anomaly">
+    <p class="widget-title">Anomaly lab</p>
+    <p class="widget-sub">Pick an anomaly and an isolation level, then step through the interleaving. Dashed rows are uncommitted writes.</p>
+    <div class="lab-mount"></div>
+    <figcaption>"No isolation" takes no locks at all. Read uncommitted still locks rows for writing, so it prevents dirty writes but allows dirty reads.</figcaption>
+  </figure>
+
+  <h2>Read skew</h2>
+  <p>Read committed still lets the data change between two reads in the same transaction. In the read skew scenario above, the report reads the sold counter before the sale commits and the free counter after it, so its numbers describe a venue that never existed. Run the report again and the totals add up. This is called a nonrepeatable read, or read skew.</p>
+
+  <p>For a web request that reads two rows, a brief inconsistency is often tolerable. For some workloads it is not. A backup copies the whole database over minutes or hours while writes keep arriving; if each part reflects a different moment, restoring it makes the inconsistency permanent. Analytic queries and integrity checks that scan large parts of the database have the same problem: they need all their reads to describe one point in time.</p>
+
+  <h2>Snapshot isolation and MVCC</h2>
+  <p>Snapshot isolation gives each transaction a consistent snapshot of the database as of the moment it started. Whatever commits later is invisible to it, so a long report sees one frozen state for its whole run. Writers still take row locks to prevent dirty writes, but readers take no locks, so readers never block writers and writers never block readers.</p>
+
+  <p>The implementation is multi-version concurrency control (MVCC). Every transaction gets an increasing transaction ID when it starts. Rows are never overwritten in place: each row version records the ID of the transaction that created it (<code>created_by</code>) and, once replaced or deleted, the ID of the transaction that did so (<code>deleted_by</code>). An update is a delete of the old version plus the creation of a new one.<span class="sidenote">PostgreSQL stores these as the hidden <code>xmin</code> and <code>xmax</code> columns of every row.</span> When a transaction reads, it walks the versions and applies a few rules:</p>
+  <ul>
+    <li>Ignore versions created by transactions that were still running when this one started, even if they have committed since.</li>
+    <li>Ignore versions created by transactions that aborted.</li>
+    <li>Ignore versions created by transactions that started later.</li>
+    <li>A deletion counts only if the deleting transaction is visible by the same rules.</li>
+  </ul>
+
+  <figure class="widget" id="lab-mvcc">
+    <p class="widget-title">Row versions under MVCC</p>
+    <p class="widget-sub">Step through and watch new versions appear. Each blue tag shows which version a running transaction would read.</p>
+    <div class="lab-mount"></div>
+    <figcaption>The setup data was written by transaction 90. T1 started first, so it keeps reading the setup version even after T2 and T3 have committed newer ones.</figcaption>
+  </figure>
+
+  <p>Old versions pile up, so a background process (VACUUM in PostgreSQL, purge in InnoDB) removes versions that no running transaction can see any more. A transaction left open for hours holds that cleanup back for the entire database, which is one reason to keep transactions short.</p>
+
+  <p>Indexes need care too. One approach lets the index point at every version of a row and has queries skip versions they cannot see; PostgreSQL adds tricks to avoid touching the index when an update stays on the same page. Another approach, used by CouchDB and LMDB, is an append-only B-tree: a write transaction copies the pages it changes up to a new root, and each root is a consistent snapshot of the whole tree.</p>
+
+  <h2>A note on names</h2>
+  <p>The SQL standard was written before snapshot isolation was described, and it defines its levels in terms of the anomalies that locking implementations allowed at the time. Vendors then mapped their own designs onto those names. PostgreSQL implements snapshot isolation and calls it repeatable read. MySQL's InnoDB also calls its level repeatable read, but it behaves differently on writes, as the next lesson shows. Oracle uses the name serializable for what is really snapshot isolation, and IBM Db2 uses repeatable read to mean serializability. The name in the documentation tells you little; test the behavior you depend on.</p>
+
+  <p class="book-ref">In the book: Chapter 7, "Weak Isolation Levels" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch7-rc.js"></script>
+</body>
+</html>

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The meaning of ACID · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch7.css">
+</head>
+<body data-lesson="acid">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>The meaning of ACID</h1>
+  </header>
+
+  <p>A transaction lets an application wrap several reads and writes into one unit that either takes effect completely or not at all. That single promise removes whole families of bugs from application code: the process that dies halfway through an update, two requests racing to change the same row, the connection that drops just after the database did the work. Without it, every one of those cases needs hand-written cleanup logic, and that logic is rarely tested.</p>
+
+  <p>Databases describe their transactional guarantees with the acronym ACID: atomicity, consistency, isolation, durability. The letters sound precise, but two databases that both claim ACID can behave very differently under concurrency, so it is worth taking each letter apart and asking what it actually buys you.<span class="sidenote">Systems that do not offer these guarantees sometimes call themselves BASE (basically available, soft state, eventual consistency). That label mostly means "not ACID" and tells you little about what you do get.</span></p>
+
+  <h2>Atomicity is about aborting</h2>
+  <p>In multithreaded programming, "atomic" means no other thread can see an operation half done. ACID uses the word differently. Here it means that if a transaction cannot finish, because a process crashes, a disk fills up, the network fails, or a constraint rejects a write, the database throws away every write the transaction made so far. Abortability would be a better name. The application never has to work out which of its five writes landed before the failure; it knows that either all of them did or none did, and if none did, it can try again.</p>
+
+  <p>The usual mechanism is a write-ahead log. Before a change touches the data files, the database appends a record describing it, with enough information to undo it (the old value) and to redo it (the new value). A transaction counts as committed at the moment its commit record is safely in the log. After a crash, recovery replays the log: it redoes the work of committed transactions and undoes any write whose transaction has no commit record. PostgreSQL's WAL and InnoDB's redo and undo logs are both variations on this idea.</p>
+
+  <figure class="widget" id="atomic">
+    <p class="widget-title">Crash in the middle of a transfer</p>
+    <p class="widget-sub">Move 40 pallets from the north warehouse to the south one. Run a statement or two, then crash.</p>
+    <div class="btn-row">
+      <button class="btn" type="button" data-mode="auto">Each statement commits alone</button>
+      <button class="btn" type="button" data-mode="txn">One transaction</button>
+    </div>
+    <ol class="tx-ops atomic-prog"></ol>
+    <div class="btn-row">
+      <button class="btn primary" type="button" data-act="next">Next statement</button>
+      <button class="btn" type="button" data-act="crash">Crash now</button>
+      <button class="btn" type="button" data-act="reset">Reset</button>
+    </div>
+    <div class="lab-pair">
+      <div><p class="lab-h">Rows</p><div class="kv atomic-rows"></div></div>
+      <div><p class="lab-h">Write-ahead log</p><ol class="wal"></ol></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Pallets on record</div><div class="stat-value" data-stat="total"></div></div>
+      <div class="stat"><div class="stat-label">Database</div><div class="stat-value sm" data-stat="state"></div></div>
+    </div>
+    <div class="verdict" aria-live="polite"></div>
+  </figure>
+
+  <h2>Consistency belongs to the application</h2>
+  <p>The C is the odd letter out. It refers to invariants, statements about your data that must always hold: the pallets in all warehouses add up to the pallets the company owns, every shipment points at a real warehouse, no seat is sold twice. The database can enforce a handful of these itself through foreign keys, unique indexes, and check constraints. Most of them live only in application code, and no database can check a rule it has never been told.</p>
+
+  <p>So consistency is something the application achieves by using the other three properties well. If every transaction starts from a valid state and its writes preserve the invariants, atomicity and isolation make sure no half-finished or interleaved mess breaks them along the way. Bear in mind that "consistency" also names unrelated ideas in replication, in consistent hashing, and in the CAP theorem; in ACID it is the weakest of the four promises.</p>
+
+  <h2>Isolation, briefly</h2>
+  <p>Isolation is about transactions that run at the same time and touch the same data. The strict definition, serializability, says the result must be the same as if the transactions had run one after another in some order. Few databases use that by default, because it costs throughput. PostgreSQL defaults to read committed, MySQL's InnoDB to repeatable read, and Oracle's level called "serializable" is really snapshot isolation. Each weaker level allows specific anomalies, and the next three lessons run them in a lab so you can see exactly which ones.</p>
+
+  <h2>Durability, and where it ends</h2>
+  <p>Durability promises that once a transaction has committed, its data will not be forgotten, even if the machine crashes a moment later. On a single node, that means the commit record reached nonvolatile storage, usually by calling <code>fsync</code> on the log before replying. In a replicated database, it means the write reached some number of other nodes before the client heard "committed".</p>
+
+  <p>Neither is absolute. Drives with volatile write caches have been caught acknowledging an <code>fsync</code> before the data was on stable media, and SSD firmware bugs have corrupted data on power loss.<span class="sidenote">In 2018 PostgreSQL developers found that on Linux a failed <code>fsync</code> could drop the dirty pages, so a retried <code>fsync</code> reported success for data that was never written.</span> Replicas that acknowledge from memory survive a single crash but not a power cut that takes out the whole rack. Failures are correlated: the same storm, firmware version, or bad deploy hits many machines at once. Try each choice below against each failure.</p>
+
+  <figure class="widget" id="durability">
+    <p class="widget-title">What did "committed" wait for?</p>
+    <p class="widget-sub">Choose the point at which the client is told the order is committed, then break something.</p>
+    <div class="lab-group"><span class="lab-label">Commit waits for</span>
+      <button class="btn" type="button" data-wait="mem">Memory only</button>
+      <button class="btn" type="button" data-wait="fsync">Local fsync</button>
+      <button class="btn" type="button" data-wait="rep1">Fsync + 1 replica</button>
+      <button class="btn" type="button" data-wait="rep2">Fsync + 2 replicas</button>
+    </div>
+    <div class="lab-group"><span class="lab-label">Then</span>
+      <button class="btn" type="button" data-fail="crash">Process crash</button>
+      <button class="btn" type="button" data-fail="power">Power cut in A</button>
+      <button class="btn" type="button" data-fail="disk">Leader disk dies</button>
+      <button class="btn" type="button" data-fail="dc">Datacentre A lost</button>
+    </div>
+    <div class="lab-group"><label class="btn check"><input type="checkbox" id="disk-lies"><span>Leader's drive lies about fsync</span></label></div>
+    <div class="scroll-x dur"></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Commit latency</div><div class="stat-value" data-stat="lat"></div></div>
+      <div class="stat"><div class="stat-label">Copies at commit</div><div class="stat-value" data-stat="copies"></div></div>
+      <div class="stat"><div class="stat-label">Order #4471</div><div class="stat-value sm" data-stat="out"></div></div>
+    </div>
+    <div class="verdict" aria-live="polite"></div>
+    <div class="table-wrap matrix-box"></div>
+    <figcaption>Replicas acknowledge once the write is in their memory and flush to disk shortly after; the failure strikes right after the acknowledgement. Latencies are rough orders of magnitude, with replica 2 a cross-region round trip away.</figcaption>
+  </figure>
+
+  <p>No setting is safe against everything; each one narrows the set of failures that lose data, and each step costs latency. In practice teams combine techniques: fsync the log, replicate synchronously to at least one other node, replicate asynchronously to another region, and keep backups that are restored and checked on a schedule.</p>
+
+  <h2>One object or many</h2>
+  <p>Even databases without transactions make writes to a single object atomic and isolated. Nobody wants a 20 KB JSON document half overwritten after a crash, or a reader seeing a mix of two writes. Storage engines use a log for crash recovery and a lock or latch per object for this. Some go further and offer an atomic increment or a compare-and-set on one key. These are useful, and sometimes sold as "lightweight transactions", but they protect one object at a time.</p>
+
+  <p>Real applications usually need more. A row in one table refers to a row in another. A denormalized counter must match the rows it counts. A secondary index is a second copy of the data that must change in step with the first. The pallet transfer above touches three rows, and only a multi-object transaction keeps them in agreement. Many distributed datastores dropped multi-object transactions because they are hard to provide across partitions, which pushes this work back onto application developers.</p>
+
+  <p>Finally, the safety net of aborting only works if someone retries, and retrying is less simple than wrapping a loop around the call. If the commit succeeded but the reply was lost, a blind retry performs the transfer twice; an idempotency key that the transaction records avoids that. If the abort happened because the database is overloaded, immediate retries add to the load; back off exponentially and cap the number of attempts. Retry only errors that can succeed next time, such as a deadlock, a serialization failure, or a dropped connection, never a constraint violation. And if the transaction also sent an email or charged a card, rolling back the database does not take those back.</p>
+
+  <p class="book-ref">In the book: Chapter 7, "The Meaning of ACID" and "Single-Object and Multi-Object Operations" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch7-acid.js"></script>
+</body>
+</html>

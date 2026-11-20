@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lost updates, write skew, and phantoms · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch7.css">
+</head>
+<body data-lesson="lost-updates-write-skew">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Lost updates, write skew, and phantoms</h1>
+  </header>
+
+  <p>Read committed and snapshot isolation describe what a transaction can see while others are writing. They say much less about two transactions that both write. That is where the bugs that reach production tend to live, because they only appear when two requests arrive within milliseconds of each other, which never happens on a developer's laptop and happens every day under real traffic.</p>
+
+  <h2>Lost updates</h2>
+  <p>The classic case is a read-modify-write cycle. A transaction reads a value, computes a new one in application code, and writes it back. If two transactions do this at the same time, the second write is based on a value that is already out of date, and the first change vanishes. Incrementing a counter, appending to a list inside a JSON document, and saving an edited wiki page all follow this shape.</p>
+
+  <p>There are several fixes, and the lab below lets you toggle them on the first scenario.</p>
+  <ul>
+    <li><strong>Atomic operations.</strong> Let the database do the read and the write together: <code>UPDATE clans SET score = score + 50 WHERE id = 'ravens'</code>. Redis <code>INCR</code> and MongoDB <code>$inc</code> are the same idea. The database holds an exclusive lock on the row for the duration, so the second increment starts from the first one's result. ORMs make it very easy to write a read-modify-write cycle in code without noticing.</li>
+    <li><strong>Explicit locking.</strong> When the logic is too complex for one statement, read the row with <code>SELECT … FOR UPDATE</code>. That takes the write lock at read time, so the second transaction waits before it even reads.</li>
+    <li><strong>Automatic detection.</strong> Under snapshot isolation the database can notice that a row it is about to write was changed by a transaction that committed after this one's snapshot, and abort. PostgreSQL's repeatable read, Oracle's serializable, and SQL Server's snapshot isolation all do this. MySQL's InnoDB at repeatable read does not, so the same code can be safe on one database and quietly lose data on another.</li>
+    <li><strong>Compare-and-set.</strong> Without transactions, write only if the value is still what you read: <code>UPDATE pages SET body = :new WHERE id = 7 AND body = :old</code>. If nothing matched, read again and retry.</li>
+  </ul>
+
+  <figure class="widget" id="lab-lost">
+    <p class="widget-title">Two writers, three anomalies</p>
+    <p class="widget-sub">Pick a scenario, an isolation level, and any fixes, then step through or run to the end.</p>
+    <div class="lab-mount"></div>
+    <figcaption>"Repeatable read (MySQL)" is snapshot isolation without the lost-update check, and its locking reads see the latest committed row. "Serializable" here is serializable snapshot isolation, as in PostgreSQL.</figcaption>
+  </figure>
+
+  <p>Replicated databases make this harder. With several leaders or no leader at all, writes can happen on different nodes at the same time, so there is no single copy to lock and no single place to compare and set. The usual approach is to accept concurrent writes, keep them as sibling versions, and merge them in application code or with a data type that knows how to merge, such as a counter that adds the increments from both sides. Last write wins, the default in many such systems, simply discards one of them.</p>
+
+  <h2>Write skew</h2>
+  <p>Switch the lab to the write skew scenario and run it under snapshot isolation. Each transaction counts the guards on duty, sees two, and updates only its own row. They write different objects, so there is no dirty write and no lost update, and snapshot isolation's lost-update check has nothing to catch. Yet the invariant is broken: nobody is watching the pool. Each transaction was correct alone; the problem only exists in the combination.</p>
+
+  <p>Write skew is the general form of the lost update. Both follow the same pattern: read something, make a decision based on it, write. When both transactions write the same object, you get a lost update, which locks and snapshot checks can catch. When they write different objects, you get write skew, and the defenses are thinner. Atomic single-object operations do not help, because several objects are involved. Few databases can declare a constraint that spans several rows. What does work is locking the rows the decision depended on, with <code>SELECT … FOR UPDATE</code>, or using serializable isolation.</p>
+
+  <p>The pattern is common once you look for it: two players moving different pieces onto the same square, two purchases each checking that a gift card has enough balance before spending it, two warehouse pickers each confirming that at least one unit will remain for a priority order.</p>
+
+  <h2>Phantoms</h2>
+  <p>Now try the phantom scenario with <code>FOR UPDATE</code> switched on. It changes nothing. The check looks for accounts that already use the handle, finds none, and so has no row to lock. Both transactions insert, and two people own the same name. When a write in one transaction changes the result of a search in another, the newly appearing row is called a phantom. Snapshot isolation hides phantoms from read-only queries, since the snapshot is fixed, but in a transaction that reads, decides, and writes, they lead straight to write skew.</p>
+
+  <p>For handles the right fix is a unique index, which the database enforces on every insert regardless of isolation level; turn it on and the second signup fails with a duplicate key error. Not every invariant can be expressed as a unique index, though.</p>
+
+  <h2>Materializing conflicts</h2>
+  <p>If the problem is that there is no row to lock, one workaround is to create rows whose only job is to be locked. A pool that schedules lifeguards by the hour could pre-create one row per pool and hour for the coming months. A transaction that changes the rota first locks the matching hour row with <code>FOR UPDATE</code>, then does its checks and writes. Two transactions touching the same hour now collide on a real row, and the database's ordinary row locks serialize them.</p>
+
+  <p>This is called materializing conflicts. It works, but it is fiddly to get right, it leaks a concurrency mechanism into the data model, and every new code path must remember to take the lock. Treat it as a last resort. When the database offers serializable isolation at an acceptable cost, that is almost always the better choice, and the next lesson shows how databases provide it.</p>
+
+  <p class="book-ref">In the book: Chapter 7, "Preventing Lost Updates" and "Write Skew and Phantoms" (1st edition).</p>
+
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch7-lost.js"></script>
+</body>
+</html>
