@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leaders and followers · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch5.css">
+</head>
+<body data-lesson="leaders-and-followers">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Leaders and followers</h1>
+  </header>
+
+  <p>Replication means keeping a copy of the same data on several machines connected by a network. You do it so the system keeps working when a machine dies, so data sits closer to the people reading it, and so read traffic can spread over more hardware. If the data never changed, replication would be a single copy job. All of the difficulty comes from change: every write has to reach every copy, and machines and networks fail halfway through that.</p>
+
+  <p>The most widely used answer is to put one replica in charge. PostgreSQL and MySQL streaming replication, MongoDB replica sets, and the partitions of a Kafka topic all work this way.</p>
+
+  <h2>One leader, many followers</h2>
+  <p>One replica is the <strong>leader</strong>. Clients send every write to it. The leader records the change in its own storage, then sends it to the other replicas, the <strong>followers</strong>, as an ordered stream. Each follower applies the changes in exactly the order the leader did, so it ends up with the same data. Reads may go to the leader or to any follower. Writes go only to the leader.<span class="sidenote">The leader is also called the primary or master; followers are called replicas, secondaries, standbys, or read replicas, depending on the product.</span></p>
+
+  <p>The decision that matters is when the leader tells the client "saved". With <strong>synchronous</strong> replication the leader waits until a follower confirms it has the change. With <strong>asynchronous</strong> replication the leader replies as soon as its own copy is durable and ships the change in the background.</p>
+
+  <p>A synchronous follower is a guarantee: if the leader dies one second after replying, the write still exists on another machine. It is also a liability: when that follower is slow or down, every write waits for it. Making every follower synchronous would let any one sick machine stall the whole database, so in practice nobody does. The common compromise is <strong>semi-synchronous</strong> replication: one follower is synchronous, the rest are asynchronous, and if the synchronous one fails, an asynchronous one takes over its role. PostgreSQL expresses this with <code>synchronous_standby_names</code>, which names how many standbys must confirm and which ones may; MySQL's semi-synchronous mode makes the leader wait for at least one replica to confirm receipt.</p>
+
+  <p>Plenty of systems run fully asynchronous anyway, because then the leader never waits for anyone. The price is that a write the client was told is durable can still disappear. The simulator further down shows exactly how.</p>
+
+  <h2>Adding a follower</h2>
+  <p>You regularly need new followers: to replace a dead machine, to add read capacity, or to move to new hardware. Copying the leader's data directory is not enough, because writes keep arriving while you copy, and locking the database for the hours a large copy takes is not an option. Instead:</p>
+  <ol>
+    <li>Take a consistent snapshot of the leader without blocking writes. Most databases can already do this for backups.</li>
+    <li>Record the exact position in the leader's replication log that the snapshot corresponds to. PostgreSQL calls this position the log sequence number; MySQL calls it the binlog coordinates or the GTID set.</li>
+    <li>Copy the snapshot to the new machine and load it.</li>
+    <li>Have the follower ask the leader for every change after that position. Once it has worked through the backlog it is caught up, and it simply keeps following the live stream.</li>
+  </ol>
+
+  <figure class="widget plain">
+    <div class="scroll-x">
+    <svg viewBox="0 0 640 210" role="img" aria-label="The leader's log has positions 1 to 12. A snapshot is taken at position 8 and copied to a new follower, which then receives positions 9 to 12 from the leader.">
+      <defs><marker id="lf-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--ink-3)"/></marker></defs>
+      <text x="0" y="45" class="diagram-label">Leader log</text>
+      <text x="0" y="61" class="diagram-sub">writes keep coming</text>
+      <g style="font:11px var(--mono)">
+        <rect x="110" y="32" width="34" height="26" rx="4" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="127" y="49" text-anchor="middle" style="fill:var(--ink)">1</text>
+        <rect x="150" y="32" width="34" height="26" rx="4" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="167" y="49" text-anchor="middle" style="fill:var(--ink)">2</text>
+        <rect x="190" y="32" width="34" height="26" rx="4" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="207" y="49" text-anchor="middle" style="fill:var(--ink)">3</text>
+        <rect x="230" y="32" width="34" height="26" rx="4" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="247" y="49" text-anchor="middle" style="fill:var(--ink)">4</text>
+        <rect x="270" y="32" width="34" height="26" rx="4" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="287" y="49" text-anchor="middle" style="fill:var(--ink)">5</text>
+        <rect x="310" y="32" width="34" height="26" rx="4" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="327" y="49" text-anchor="middle" style="fill:var(--ink)">6</text>
+        <rect x="350" y="32" width="34" height="26" rx="4" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="367" y="49" text-anchor="middle" style="fill:var(--ink)">7</text>
+        <rect x="390" y="32" width="34" height="26" rx="4" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="407" y="49" text-anchor="middle" style="fill:var(--ink)">8</text>
+        <rect x="430" y="32" width="34" height="26" rx="4" style="fill:var(--bg);stroke:var(--line-2)"/><text x="447" y="49" text-anchor="middle" style="fill:var(--ink)">9</text>
+        <rect x="470" y="32" width="34" height="26" rx="4" style="fill:var(--bg);stroke:var(--line-2)"/><text x="487" y="49" text-anchor="middle" style="fill:var(--ink)">10</text>
+        <rect x="510" y="32" width="34" height="26" rx="4" style="fill:var(--bg);stroke:var(--line-2)"/><text x="527" y="49" text-anchor="middle" style="fill:var(--ink)">11</text>
+        <rect x="550" y="32" width="34" height="26" rx="4" style="fill:var(--bg);stroke:var(--line-2)"/><text x="567" y="49" text-anchor="middle" style="fill:var(--ink)">12</text>
+      </g>
+      <path d="M110 66 v6 h314 v-6" style="fill:none;stroke:var(--accent)"/>
+      <text x="267" y="86" text-anchor="middle" class="diagram-sub">snapshot, consistent as of position 8</text>
+      <line x1="200" y1="92" x2="200" y2="140" style="stroke:var(--ink-3);stroke-width:1.5" marker-end="url(#lf-arr)"/>
+      <text x="208" y="120" class="diagram-sub">1. copy and load</text>
+      <g style="stroke:var(--accent);stroke-width:1.5">
+        <line x1="447" y1="60" x2="447" y2="140" marker-end="url(#lf-arr)"/>
+        <line x1="487" y1="60" x2="487" y2="140" marker-end="url(#lf-arr)"/>
+        <line x1="527" y1="60" x2="527" y2="140" marker-end="url(#lf-arr)"/>
+        <line x1="567" y1="60" x2="567" y2="140" marker-end="url(#lf-arr)"/>
+      </g>
+      <text x="0" y="161" class="diagram-label">New follower</text>
+      <text x="0" y="177" class="diagram-sub">then streams live</text>
+      <g style="font:11px var(--mono)">
+        <rect x="110" y="146" width="314" height="26" rx="4" style="fill:var(--accent-soft);stroke:var(--accent)"/><text x="267" y="163" text-anchor="middle" style="fill:var(--ink)">1 to 8, from the snapshot</text>
+        <rect x="430" y="146" width="34" height="26" rx="4" style="fill:var(--green-soft);stroke:var(--green)"/><text x="447" y="163" text-anchor="middle" style="fill:var(--ink)">9</text>
+        <rect x="470" y="146" width="34" height="26" rx="4" style="fill:var(--green-soft);stroke:var(--green)"/><text x="487" y="163" text-anchor="middle" style="fill:var(--ink)">10</text>
+        <rect x="510" y="146" width="34" height="26" rx="4" style="fill:var(--green-soft);stroke:var(--green)"/><text x="527" y="163" text-anchor="middle" style="fill:var(--ink)">11</text>
+        <rect x="550" y="146" width="34" height="26" rx="4" style="fill:var(--green-soft);stroke:var(--green)"/><text x="567" y="163" text-anchor="middle" style="fill:var(--ink)">12</text>
+      </g>
+      <text x="584" y="198" text-anchor="end" class="diagram-sub">2. asks for everything after position 8, and receives it in order</text>
+    </svg>
+    </div>
+    <figcaption>The snapshot and the log position travel together. Without the position, the follower would not know where in the stream to start.</figcaption>
+  </figure>
+
+  <p>The same request heals a follower that crashed or lost its network for a while. It knows the last position it applied, so on restart it asks the leader for everything after that and catches up. You can try it below: crash a follower, send a few writes, then restart it and watch the catch-up messages.<span class="sidenote">The leader has to keep enough log around for this to work. PostgreSQL replication slots and Kafka's retention settings exist partly for this reason.</span></p>
+
+  <h2>Failover</h2>
+  <p>Losing a follower is easy to handle. Losing the leader is not: a follower has to be promoted, clients have to start sending writes to it, and the other followers have to start consuming from it. This is <strong>failover</strong>, and when it is automatic it usually has three steps.</p>
+  <ol>
+    <li><strong>Decide the leader is dead.</strong> A dead machine and a slow one look the same from outside, so systems use a timeout: no answer to heartbeats for, say, 10 or 30 seconds, and the leader is presumed gone.</li>
+    <li><strong>Choose a new leader.</strong> The best candidate is the follower with the most recent data, because promoting it loses the least. Getting every node to agree on the choice is a consensus problem, which is why tools such as Patroni lean on etcd or ZooKeeper.</li>
+    <li><strong>Reconfigure.</strong> Clients must send writes to the new leader, followers must follow it, and if the old leader comes back it must accept that it is no longer in charge.</li>
+  </ol>
+
+  <p>The simulator runs a leader, n1, and three followers that are progressively farther away. Two clients write: the app, which is told about any failover, and a cron job that looked up the leader's address once when it started. Every follower starts asynchronous. Send a few writes from the app, crash n1 while some are still on their way to the followers, and press Run failover. Then reset, make n2 synchronous, and do the same thing again. Finally, restart n1 after a failover and send a write from the cron job, once with fencing and once without.</p>
+
+  <figure class="widget" id="failover">
+    <p class="widget-title">One leader, three followers</p>
+    <p class="widget-sub">Choose sync or async per follower, write, crash the leader, and fail over.</p>
+    <div class="controls">
+      <div class="control"><label for="fo-delay">Network delay <output></output></label><input id="fo-delay" type="range" min="40" max="400" step="10" value="160"></div>
+      <div class="control"><label for="fo-timeout">Failover timeout <output></output></label><input id="fo-timeout" type="range" min="200" max="3000" step="100" value="800"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" data-act="write-app">Write from app</button>
+      <button class="btn" data-act="write-cron">Write from cron job</button>
+      <button class="btn" data-act="failover">Run failover</button>
+      <label class="btn check"><input type="checkbox" id="fo-fence" checked> Fence the old leader</label>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="ch5-nodes"></div>
+    <div class="st"></div>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>write</span>
+      <span><i style="background:var(--ink-3)"></i>replication</span>
+      <span><i style="background:var(--green)"></i>acknowledgement</span>
+      <span><i style="background:var(--ink-2)"></i>leader change</span>
+      <span><i style="background:var(--red)"></i>refused, or lost (×)</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-label">Acknowledged</div><div class="stat-value" data-out="acked">0</div></div>
+      <div class="stat"><div class="stat-label">No reply yet</div><div class="stat-value" data-out="waiting">0</div></div>
+      <div class="stat"><div class="stat-label">Acknowledged, not on leader</div><div class="stat-value" data-out="lost">0</div></div>
+      <div class="stat"><div class="stat-label">Nodes acting as leader</div><div class="stat-value" data-out="leaders">1</div></div>
+    </div>
+    <div class="verdict"></div>
+    <figcaption>Each log entry shows its position and its write. Blue entries were acknowledged to a client; orange entries were acknowledged but the current leader does not have them.</figcaption>
+  </figure>
+
+  <p>Each step of failover hides a way to lose data or corrupt it.</p>
+  <p><strong>Unreplicated writes.</strong> With asynchronous replication, the new leader may not have the last writes the old leader acknowledged. When the old leader returns, its log disagrees with the new one at the same positions, and the usual resolution is to throw its extra writes away. Clients were told those writes were durable. Worse, something outside the database may already have acted on them: an email went out, a payment was captured, or another system stored an ID that the new leader will now hand out again to a different row.</p>
+  <p><strong>Split brain.</strong> If the old leader returns believing it still leads, and some client still talks to it, two nodes accept writes and their histories fork. The defence is <strong>fencing</strong>: every leader carries an epoch number, a node that sees a higher epoch steps down, and in harsher setups the cluster manager cuts the old leader's power or network outright. Fencing has to be designed carefully, or it can shut down both nodes.<span class="sidenote">Epochs go by other names: terms in Raft and etcd, generation numbers, or leader epochs in Kafka.</span></p>
+  <p><strong>The timeout.</strong> A long timeout means a long outage after a real crash. A short one triggers failovers during a load spike or a brief network hiccup, which adds work exactly when the system is already struggling, and makes split brain more likely. Because of these risks, some teams keep failover a manual decision even when their tooling can automate it.</p>
+
+  <h2>What travels in the replication log</h2>
+  <p>"Send the change to the followers" can mean several different things. The choice decides what the followers can be, how upgrades work, and who else can read the stream.</p>
+  <div class="table-wrap"><table class="tradeoffs">
+    <tr><th>Method</th><th>What the leader sends</th><th>Trade-offs</th></tr>
+    <tr><td>Statement-based</td><td>The SQL statement text: <code>UPDATE stock SET qty = qty - 1 WHERE sku = 'K-17'</code></td><td>Compact, but any statement whose result is not deterministic breaks it: <code>NOW()</code>, <code>RAND()</code>, auto-increment columns, triggers, or an <code>UPDATE ... LIMIT</code> without an order. MySQL switches such statements to row-based logging.</td></tr>
+    <tr><td>Write-ahead log shipping</td><td>The storage engine's own log: which bytes changed in which disk pages</td><td>An exact physical copy, used by PostgreSQL streaming replication. The format is tied to the storage engine version, so leader and followers usually must run the same major version, which rules out upgrading followers first.</td></tr>
+    <tr><td>Logical, row-based</td><td>Per row: the new values for an insert, the key and new values for an update, the key for a delete</td><td>Independent of the storage layout, so versions can differ. Easy for other systems to consume, which is the basis of change data capture tools such as Debezium. Used by MySQL's row-format binlog and PostgreSQL logical replication.</td></tr>
+    <tr><td>Trigger-based</td><td>Whatever your triggers or application code write to a change table</td><td>Most flexible: replicate a subset, transform rows, or replicate between different databases. Slower and more fragile than built-in replication.</td></tr>
+  </table></div>
+
+  <p class="book-ref">In the book: Chapter 5, "Leaders and Followers" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch5-failover.js"></script>
+</body>
+</html>

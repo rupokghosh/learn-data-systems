@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Detecting concurrent writes · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch5.css">
+</head>
+<body data-lesson="concurrent-writes">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Detecting concurrent writes</h1>
+  </header>
+
+  <p>Leaderless and multi-leader systems let several clients write the same key at the same moment. Those writes travel over different network paths with different delays, so replicas receive them in different orders. Suppose one replica gets "set color to teal" and then "set color to amber", while another replica gets them the other way round. If each replica simply keeps the last value it received, the two disagree forever, and no amount of waiting will fix it.</p>
+
+  <p>To converge, every replica has to apply the same rule and reach the same result whatever the arrival order. The question is which rule, and what it costs.</p>
+
+  <h2>Last write wins</h2>
+  <p>The bluntest rule is <strong>last write wins</strong> (LWW): attach a timestamp to every write, and on every replica keep the value with the largest timestamp and discard the rest. Replicas converge, and the implementation is trivial. The price is durability. If five clients write the same key concurrently, each is told its write succeeded, and four of those writes vanish without a trace. Because the timestamps come from clocks on different machines, LWW can even discard a write that was made later and with full knowledge of the earlier one, simply because its machine's clock was behind.<span class="sidenote">The multi-leader lesson shows this with a Singapore clock running 400 ms slow.</span></p>
+  <p>Cassandra resolves every conflict this way. LWW is reasonable when losing writes is acceptable, for example in caches or for sensor readings where the next reading replaces the last anyway. When it is not, the usual advice is to make every write go to a fresh key, such as a UUID, so values are never overwritten and nothing can be lost.</p>
+
+  <h2>Happens-before and concurrency</h2>
+  <p>To do better than LWW, a system has to tell apart two situations that look identical on the wire. Operation A <strong>happens before</strong> operation B if B knew about A: B read A's result, or depended on it, or built on it. In that case B may safely replace A. If neither knew about the other, the two are <strong>concurrent</strong>, and replacing one with the other loses information.</p>
+  <p>For any two operations there are exactly three possibilities: A happened before B, B happened before A, or they are concurrent. Concurrency here is about knowledge, not clock time. Two writes made a minute apart are concurrent if a network problem kept each writer from seeing the other's result, and two writes a millisecond apart are ordered if the second writer had already read the first.</p>
+
+  <h2>Version numbers and siblings</h2>
+  <p>A single server can track happens-before with one counter per key:</p>
+  <ol>
+    <li>The server keeps a version number for every key and increments it on every write. It stores each value together with the version that created it.</li>
+    <li>A read returns every value that has not been overwritten, plus the latest version number. A client must read before it writes.</li>
+    <li>A write carries the version number from the client's previous read, along with a value in which the client has merged everything it received.</li>
+    <li>The server overwrites every value with that version number or lower, because the client has seen them. Values with a higher version are kept, because they were written concurrently. The values kept side by side are called <strong>siblings</strong>.</li>
+  </ol>
+  <p>No data is silently dropped, but the work moves to the application, which has to merge siblings. For a set of items, such as a shared packing list, the union of the siblings is a natural merge. Removals break it: if one sibling no longer contains an item, the union cannot tell whether the item was removed or was simply never added. The fix is a <strong>tombstone</strong>, a marker recording that the item was removed, which the merge then subtracts.</p>
+
+  <p>Two friends, Noor and Felix, are packing for a camping trip and editing one shared list from their phones. Step through the example, then repeat it with tombstones switched on.</p>
+
+  <figure class="widget" id="siblings">
+    <p class="widget-title">Siblings on one key</p>
+    <p class="widget-sub">Step through the example, or add, remove (click an item), and read on your own.</p>
+    <div class="btn-row">
+      <button class="btn primary" data-act="next">Play example, step 1</button>
+      <label class="btn check"><input type="checkbox" id="sb-tomb"> Tombstones for removals</label>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="ch5-clients">
+      <div class="ch5-client" data-client="noor">
+        <p class="lane-label"><span>Noor's phone</span><span data-out="known"></span></p>
+        <div class="lane ch5-items"></div>
+        <div class="btn-row" style="margin-top:8px"><button class="btn sm" data-add="noor">Add</button><button class="btn sm" data-read="noor">Read</button></div>
+      </div>
+      <div class="ch5-client">
+        <p class="lane-label"><span>Server, key "packing-list"</span><span data-out="counter"></span></p>
+        <div class="lane" style="display:block" data-out="sibs"></div>
+      </div>
+      <div class="ch5-client" data-client="felix">
+        <p class="lane-label"><span>Felix's phone</span><span data-out="known"></span></p>
+        <div class="lane ch5-items"></div>
+        <div class="btn-row" style="margin-top:8px"><button class="btn sm" data-add="felix">Add</button><button class="btn sm" data-read="felix">Read</button></div>
+      </div>
+    </div>
+    <div class="st"></div>
+    <ol class="steps"></ol>
+    <div class="verdict"></div>
+    <figcaption>Each write is labelled with the item and the version it was based on. Orange server dots and replies mean the key holds more than one sibling.</figcaption>
+  </figure>
+
+  <p>Riak works this way and returns siblings to the application. Writing merge functions by hand is error-prone, which is why Riak also offers built-in data types, sets, counters, and maps, that merge themselves. These are conflict-free replicated data types (CRDTs), the same idea behind collaborative editing libraries such as Automerge and Yjs.</p>
+
+  <h2>Version vectors</h2>
+  <p>One counter is enough when one server assigns all the versions. With several replicas accepting writes and no leader, each replica needs its own counter, and each replica tracks the counters it has seen from all the others. That collection of counters is a <strong>version vector</strong>. Replicas send it along when they sync, and databases return it to clients with every read, so the client can send it back with its next write. Riak calls this the causal context.</p>
+  <p>Comparing two version vectors answers the happens-before question directly. If every counter in A is less than or equal to the matching counter in B, and they are not identical, A happened before B, and B's value can replace A's. If A is ahead on some counter and B on another, they are concurrent, and both values must be kept as siblings until something merges them.<span class="sidenote">Version vectors are often called vector clocks. The two are closely related but not identical; Riak moved to a refinement called dotted version vectors to avoid sibling explosion.</span></p>
+
+  <p>The figure starts with a short history of a shared thermostat setpoint stored on three replicas. Compare e3 and e4, then e1 and e6. Then make your own events and compare any two: click dots on the diagram, or use the menus.</p>
+
+  <figure class="widget" id="vv">
+    <p class="widget-title">Version vectors across three replicas</p>
+    <p class="widget-sub">Write at a replica, send a replica's state to another, then compare two events.</p>
+    <div class="btn-row">
+      <button class="btn primary" data-write="A">Write at A</button>
+      <button class="btn primary" data-write="B">Write at B</button>
+      <button class="btn primary" data-write="C">Write at C</button>
+    </div>
+    <div class="btn-row">
+      <span class="note" style="margin:0">Send state</span>
+      <button class="btn sm" data-from="A" data-to="B">A → B</button>
+      <button class="btn sm" data-from="B" data-to="A">B → A</button>
+      <button class="btn sm" data-from="B" data-to="C">B → C</button>
+      <button class="btn sm" data-from="C" data-to="B">C → B</button>
+      <button class="btn sm" data-from="A" data-to="C">A → C</button>
+      <button class="btn sm" data-from="C" data-to="A">C → A</button>
+    </div>
+    <div class="ch5-cards"></div>
+    <div class="st"></div>
+    <div class="ch5-compare">
+      <label for="vv-a">Compare</label><select class="field" id="vv-a"></select>
+      <label for="vv-b">with</label><select class="field" id="vv-b"></select>
+    </div>
+    <div class="verdict"></div>
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn" data-act="example">Load the example</button>
+      <button class="btn" data-act="clear">Start empty</button>
+    </div>
+    <figcaption>A vector such as A1 B1 C0 means: one write from A and one from B are reflected here, none from C. Orange dots mark a replica holding siblings. A write replaces whatever values its replica holds.</figcaption>
+  </figure>
+
+  <p>The rules from this lesson carry over to every system that accepts writes in more than one place. If your database only offers last write wins, design for it: use immutable values under fresh keys, or accept the loss knowingly. If it offers siblings, write the merge function deliberately, decide how removals are represented, and test it with concurrent writers, not just sequential ones.</p>
+
+  <p class="book-ref">In the book: Chapter 5, "Detecting Concurrent Writes" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch5-versionsviz.js"></script>
+</body>
+</html>

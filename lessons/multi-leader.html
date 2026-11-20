@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-leader replication · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch5.css">
+</head>
+<body data-lesson="multi-leader">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Multi-leader replication</h1>
+  </header>
+
+  <p>Single-leader replication has one obvious weakness: every write goes through one machine. If a client cannot reach the leader, because of a network problem or because the leader is in another part of the world, it cannot write at all. The natural extension is to let more than one node accept writes. Each leader takes writes locally and forwards them to the others, so every leader is also a follower of every other leader.</p>
+
+  <p>This buys availability and latency, and pays for them with the hardest problem in replication: two leaders can accept conflicting writes at the same time, and someone has to decide what the data looks like afterwards.</p>
+
+  <h2>When more than one leader makes sense</h2>
+  <p>Inside a single data centre, multi-leader replication rarely earns its complexity. It shows up in three situations.</p>
+  <ul>
+    <li><strong>Several data centres.</strong> Put a leader in each region. Writes are handled locally and replicated between regions asynchronously, so users do not pay a cross-ocean round trip on every write, a region can keep working when another one is down, and a flaky link between regions does not stall writes. Tools in this space include BDR for PostgreSQL and Tungsten Replicator for MySQL; several cloud databases offer it as a managed option.</li>
+    <li><strong>Clients that work offline.</strong> A notes or calendar app that must work on a plane keeps a local database on each device. Every device is a leader, and syncing is multi-leader replication with a replication lag of hours. CouchDB and its in-browser sibling PouchDB were designed for this.</li>
+    <li><strong>Collaborative editing.</strong> When several people edit one document at once, each person's local copy accepts their keystrokes immediately and changes flow between them. The unit of change is tiny, a keystroke, but the conflict problem is the same.</li>
+  </ul>
+  <p>Multi-leader support is often bolted onto a database that was designed for one leader, and features such as auto-increment keys, triggers, and integrity constraints can behave surprisingly once two nodes write at once.<span class="sidenote">Auto-increment is the classic trap: two leaders both hand out the next ID. A common workaround gives each leader its own interleaved sequence, for example odd and even numbers.</span></p>
+
+  <h2>Write conflicts</h2>
+  <p>A team of three is planning an offsite, and the destination lives in one record. Amara in Frankfurt, Kenji in Singapore, and Luis in São Paulo each change it within the same second. Each change succeeds immediately at the local leader. Only later, when the changes are replicated, does each data centre discover that another leader changed the same record from the same starting value. With a single leader the second writer would have waited, or been told the record had changed. Here every writer was told "saved".</p>
+  <p>Conflict detection could be made synchronous, by waiting for every leader to agree before confirming, but then you have rebuilt single-leader replication with extra steps and lost the reason for having several leaders. So conflicts are detected after the fact, and the system must then <strong>converge</strong>: every replica has to end up with the same value, whatever order the changes arrived in.</p>
+
+  <figure class="widget" id="conflict">
+    <p class="widget-title">Three data centres, one record</p>
+    <p class="widget-sub">Make concurrent edits, then switch between resolution strategies to compare the outcome.</p>
+    <div class="controls">
+      <div class="control"><label for="mc-delay">Delay between data centres <output></output></label><input id="mc-delay" type="range" min="100" max="2000" step="50" value="900"></div>
+    </div>
+    <div class="btn-row" data-out="strategies"></div>
+    <div class="ch5-cards"></div>
+    <div class="btn-row">
+      <button class="btn primary" data-act="all">Edit all three at once</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="st"></div>
+    <p class="lane-label"><span>Edits lost for good</span></p>
+    <div class="ch5-lostlist" data-out="lost"></div>
+    <div class="verdict"></div>
+    <figcaption>Singapore's clock runs 400 ms slow, as real clocks sometimes do. Timestamps come from the local clock of the data centre that took the edit.</figcaption>
+  </figure>
+
+  <h2>Resolving conflicts</h2>
+  <p>The simplest strategy is to make conflicts impossible. <strong>Conflict avoidance</strong> routes every write for a given record to the same leader, for example the home data centre of the user or team that owns it. For that record, the system behaves like single-leader replication. It is the most widely recommended approach, and it breaks down when the home data centre fails or the owner moves, because then writes have to be rerouted and conflicts become possible again.</p>
+  <p>When conflicts can happen, the replicas have to converge on one outcome. The options, all of which you can try above:</p>
+  <ul>
+    <li><strong>Last write wins.</strong> Attach a timestamp or unique ID to every write and keep the highest. Simple and popular, and it throws data away without telling anyone. Clocks on different machines disagree, so "last" is not even reliably last.</li>
+    <li><strong>Priority by replica.</strong> Let writes from a designated replica win. Just as lossy, with a different victim.</li>
+    <li><strong>Merge.</strong> Combine the values, for example by sorting and joining them. Nothing is lost, and for sets, counters, and lists this is often exactly right. For a single choice such as a destination, the merged value means nothing.</li>
+    <li><strong>Record the conflict and let application code decide.</strong> Keep every version. A conflict handler can run as soon as the conflict is detected, without a human, or the versions can be shown to the next reader, often a person, who picks one. CouchDB works the second way.</li>
+  </ul>
+  <p>Writing correct custom resolution is surprisingly hard, which is why there is active work on data types that resolve conflicts automatically and sensibly: conflict-free replicated data types (CRDTs), used in Riak and in collaborative editors, and operational transformation, the algorithm behind many real-time document editors.</p>
+
+  <h2>Replication topologies</h2>
+  <p>With more than two leaders, you also choose the paths writes travel. In a <strong>circular</strong> topology each node forwards to the next, which was long MySQL's default. In a <strong>star</strong>, one hub forwards to everyone. In <strong>all-to-all</strong>, every leader sends directly to every other. To stop a write from looping forever, each write carries the IDs of the nodes it has passed through, and a node ignores writes it has already seen.</p>
+  <p>Circular and star topologies have a weak spot: a write has to pass through intermediate nodes, so one failed node can cut others off until someone reconfigures the topology. All-to-all avoids that, but brings its own problem. Some links are faster than others, so writes can overtake each other. If one leader inserts a row and another updates that row, a third leader can receive the update first.</p>
+
+  <figure class="widget" id="topo">
+    <p class="widget-title">How a write travels between four leaders</p>
+    <p class="widget-sub">Choose a topology, fail a leader, then click another leader to write there.</p>
+    <div class="btn-row">
+      <button class="btn" data-kind="circular" aria-pressed="true">Circular</button>
+      <button class="btn" data-kind="star" aria-pressed="false">Star</button>
+      <button class="btn" data-kind="all" aria-pressed="false">All-to-all</button>
+    </div>
+    <div class="btn-row">
+      <span class="note" style="margin:0">Click a leader to</span>
+      <button class="btn sm" data-mode="write" aria-pressed="true">write</button>
+      <button class="btn sm" data-mode="fail" aria-pressed="false">fail or recover</button>
+      <button class="btn" data-act="overtake">Overtaking demo</button>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="topo"><svg viewBox="0 0 420 280" role="img" aria-label="Four leaders and the links between them"></svg></div>
+    <div class="st"></div>
+    <div class="verdict"></div>
+    <figcaption>The overtaking demo uses all-to-all with a slow link from A to C. Updates are drawn in orange.</figcaption>
+  </figure>
+
+  <p>Attaching timestamps does not fix overtaking, because clocks cannot be trusted to order events across machines. The fix is to track which writes each write depends on, with version vectors, which the lesson on concurrent writes builds up step by step. Many multi-leader systems implement conflict detection and causal ordering poorly, so if you run one, test these scenarios before you rely on it.</p>
+
+  <p class="book-ref">In the book: Chapter 5, "Multi-Leader Replication" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch5-multiviz.js"></script>
+</body>
+</html>

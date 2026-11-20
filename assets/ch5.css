@@ -1,0 +1,102 @@
+/* =========================================================
+   Chapter 5: replication visuals.
+   Loaded after style.css. Colours only through its variables.
+   ========================================================= */
+
+/* ---------- Space-time diagram ---------- */
+.st { width: 100%; margin-top: 6px; }
+.st svg { display: block; }
+.st-label { fill: var(--ink); font: 500 12.5px var(--sans); }
+.st-sub { fill: var(--ink-3); font: 11px var(--sans); }
+.st-sub.bad { fill: var(--red); }
+.st-sub.lead { fill: var(--accent); }
+.st-sub.good { fill: var(--green); }
+.st-lane { stroke: var(--line-2); stroke-width: 1.5; }
+.st-down { stroke: var(--red); stroke-width: 2; stroke-dasharray: 3 4; }
+.st-now { stroke: var(--line-2); stroke-width: 1; stroke-dasharray: 2 3; }
+.st-msg { stroke-width: 1.5; fill: none; }
+.st-msg.lost { stroke-dasharray: 4 3; opacity: 0.7; }
+.st-x { fill: var(--red); font: 600 15px var(--sans); }
+.st-mlabel { font: 500 10.5px var(--sans); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
+.st-klabel { font: 500 10.5px var(--sans); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
+.st-mark circle { stroke-width: 2; }
+.st-mark.pick { cursor: pointer; }
+.st-mark.sel circle { fill: var(--accent-soft) !important; stroke-width: 2.5; }
+
+/* ---------- Small buttons and tabs ---------- */
+.widget [hidden] { display: none !important; }
+.btn.sm { height: 26px; padding: 0 9px; font-size: 12px; }
+.ch5-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+select.field { font: 13px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; height: 30px; padding: 0 8px; max-width: 100%; }
+.stat.bad .stat-value { color: var(--red); }
+.stat.good .stat-value { color: var(--green); }
+.ch5-empty { font: 12px var(--sans); color: var(--ink-4); align-self: center; padding: 0 4px; }
+
+/* ---------- Lesson 1: node panels ---------- */
+.ch5-nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 18px; margin-bottom: 8px; }
+.ch5-node { min-width: 0; }
+.ch5-node-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font: 13px/1.3 var(--sans); color: var(--ink-3); margin-bottom: 5px; }
+.ch5-node-name { font: 500 13px var(--mono); color: var(--ink); }
+.ch5-node-btns { margin-left: auto; display: flex; gap: 6px; }
+.ch5-node.is-leader .ch5-role { color: var(--accent); }
+.ch5-node.is-leader .ch5-log { border-style: solid; border-color: var(--accent); }
+.ch5-node.is-down .ch5-role { color: var(--red); }
+.ch5-node.is-down .ch5-log { opacity: 0.55; }
+.ch5-log { min-height: 36px; transition: border-color 200ms ease, opacity 200ms ease; }
+.ch5-log .rec { padding: 4px 6px; }
+.ch5-log .rec .v { font-size: 10px; color: var(--ink-4); }
+
+/* ---------- Lesson 2: what the user saw ---------- */
+.ch5-saw { list-style: none; padding: 0; margin: 12px 0 0; font: 13.5px/1.5 var(--sans); color: var(--ink-2); }
+.ch5-saw li { display: flex; gap: 10px; margin: 4px 0; }
+.ch5-saw .t { flex: 0 0 56px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.ch5-saw .bad { color: var(--red); }
+.ch5-saw .good { color: var(--green); }
+
+/* ---------- Lesson 3: data centre cards and topology ---------- */
+.ch5-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.ch5-card { border: 1px solid var(--line-2); border-radius: 8px; padding: 10px 12px; min-width: 0; transition: border-color 200ms ease, background-color 200ms ease; }
+.ch5-card.conflict { border-color: var(--orange); background: var(--orange-soft); }
+.ch5-card-head { display: flex; justify-content: space-between; gap: 8px; font: 12px/1.4 var(--sans); color: var(--ink-3); }
+.ch5-card-val { font: 500 17px/1.4 var(--serif); color: var(--ink); margin: 4px 0 8px; overflow-wrap: anywhere; }
+.ch5-card .btn { width: 100%; justify-content: center; }
+.ch5-card .pick-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.ch5-card .pick-row .btn { width: auto; }
+.ch5-lostlist { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.topo svg { display: block; width: 100%; max-width: 420px; margin: 0 auto; }
+.topo .dg-node.down rect { fill: var(--red-soft); stroke: var(--red); stroke-dasharray: 3 3; }
+.topo .dg-node.hub rect { stroke-width: 2; }
+.topo .dg-node.err rect { fill: var(--red-soft); stroke: var(--red); }
+.topo .dg-node { cursor: pointer; }
+.topo .dg-node .chips { font: 500 11px var(--mono); fill: var(--ink-3); }
+
+/* ---------- Lesson 4: quorum table ---------- */
+.ch5-replicas { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.ch5-replicas .btn { font-family: var(--mono); }
+.ch5-replicas .btn[aria-pressed="true"] { background: var(--red-soft); border-color: var(--red); color: var(--red); text-decoration: line-through; }
+table.ch5-q { border-collapse: collapse; font: 13px/1.4 var(--sans); width: 100%; min-width: 360px; }
+.ch5-q th, .ch5-q td { padding: 6px 6px; border-bottom: 1px solid var(--line); text-align: center; font-variant-numeric: tabular-nums; }
+.ch5-q th:first-child, .ch5-q td:first-child { text-align: left; color: var(--ink-3); font-weight: 400; white-space: nowrap; }
+.ch5-q th { font: 500 12px var(--mono); color: var(--ink); }
+.ch5-q td.yes { color: var(--accent); }
+.ch5-q td.both { background: var(--green-soft); color: var(--green); font-weight: 500; }
+.ch5-q td.old { color: var(--red); }
+.ch5-q td.down { color: var(--ink-4); }
+.ch5-rule { font: 14px/1.5 var(--sans); padding: 8px 12px; border-radius: 6px; background: var(--surface-2); color: var(--ink-2); margin-bottom: 12px; }
+.ch5-rule b { font-weight: 500; font-variant-numeric: tabular-nums; }
+.ch5-rule.good b { color: var(--green); }
+.ch5-rule.bad b { color: var(--orange); }
+
+/* ---------- Lesson 5: clients, siblings, vectors ---------- */
+.ch5-clients { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 18px; margin-bottom: 8px; }
+.ch5-client { min-width: 0; }
+.ch5-client .btn-row { margin-bottom: 6px; }
+.ch5-items { display: flex; flex-wrap: wrap; gap: 4px; min-height: 28px; }
+.ch5-items .rec { cursor: default; }
+.ch5-items button.rec { cursor: pointer; font: 12px/1 var(--mono); }
+.ch5-sib { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 4px 0; }
+.ch5-sib .ver { font: 500 11px var(--mono); color: var(--purple); min-width: 26px; }
+.rec.tomb { text-decoration: line-through; color: var(--red); border-color: var(--red); background: var(--red-soft); }
+.vv { font: 500 12px var(--mono); color: var(--ink); white-space: nowrap; }
+.ch5-compare { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 13px var(--sans); color: var(--ink-3); margin: 12px 0 0; }
+.ch5-sync { display: grid; grid-template-columns: repeat(3, auto); gap: 6px; justify-content: start; }

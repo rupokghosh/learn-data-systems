@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Problems with replication lag · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch5.css">
+</head>
+<body data-lesson="replication-lag">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Problems with replication lag</h1>
+  </header>
+
+  <p>Leader-based replication has an attractive property for read-heavy applications: add followers and you add read capacity. Most web workloads read far more than they write, so a common design sends every write to one leader and spreads reads across many followers. That only works with asynchronous replication. If every read replica were synchronous, one slow machine anywhere in the fleet could stall every write.</p>
+
+  <p>Asynchronous followers are, by design, a little behind. Ask the leader and a follower the same question at the same moment and you may get two different answers. Stop writing, wait, and the followers catch up and agree with the leader again. That temporary disagreement has a name: <strong>eventual consistency</strong>.</p>
+
+  <h2>How far behind is a follower?</h2>
+  <p>The <strong>replication lag</strong> is the delay between a write landing on the leader and the same write landing on a follower. Under normal load it is usually a fraction of a second, too short for anyone to notice. Nothing bounds it, though. A follower busy with a long analytical query, a burst of writes after a bulk import, a congested link between regions, or a follower restarting after maintenance can stretch it to seconds or minutes. The word "eventually" comes with no number attached.<span class="sidenote">Measure it rather than guess: PostgreSQL reports <code>replay_lag</code> in <code>pg_stat_replication</code>, and MySQL reports <code>Seconds_Behind_Source</code> in <code>SHOW REPLICA STATUS</code>.</span></p>
+  <p>When the lag grows, users notice it as a few specific anomalies. Each has a name, a guarantee that rules it out, and a few standard ways to provide that guarantee. The figure below plays one short story for each.</p>
+
+  <figure class="widget" id="lag">
+    <p class="widget-title">Reading from a lagging follower</p>
+    <p class="widget-sub">Pick a story and watch the anomaly. Then choose a fix and watch it again.</p>
+    <div class="ch5-tabs">
+      <button class="btn" data-tab="own" aria-pressed="true">Read your own writes</button>
+      <button class="btn" data-tab="monotonic" aria-pressed="false">Monotonic reads</button>
+      <button class="btn" data-tab="prefix" aria-pressed="false">Consistent prefix reads</button>
+    </div>
+    <p class="note" data-out="story" style="margin:0 0 12px"></p>
+    <div class="btn-row" data-out="fixes"></div>
+    <div class="btn-row">
+      <button class="btn" data-act="replay">Play again</button>
+      <button class="btn" data-act="another">Another run</button>
+    </div>
+    <div class="st"></div>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>write</span>
+      <span><i style="background:var(--ink-3)"></i>replication</span>
+      <span><i style="background:var(--green)"></i>acknowledgement</span>
+      <span><i style="background:var(--purple)"></i>read and its answer</span>
+      <span><i style="background:var(--red)"></i>anomaly</span>
+    </div>
+    <ol class="ch5-saw" aria-live="polite"></ol>
+    <div class="verdict"></div>
+    <figcaption>Dots on a follower's line mark the moment it applied a write. Another run changes the random delays and routing.</figcaption>
+  </figure>
+
+  <h2>Reading your own writes</h2>
+  <p>In the first story, a person changes something and immediately looks at it. The write went to the leader; the read went to a follower that has not received it yet. From where Ines sits, the change was lost, so she makes it again, or she contacts support.</p>
+  <p>The guarantee that rules this out is <strong>read-after-write consistency</strong>, also called read-your-writes: a user always sees their own updates. It promises nothing about updates made by other people, which may still arrive late. Common ways to provide it:</p>
+  <ul>
+    <li><strong>Read what the user may have changed from the leader.</strong> Only Ines edits her own profile, so a simple rule works: her own profile comes from the leader, everyone else's from followers.</li>
+    <li><strong>Read from the leader for a while after a write.</strong> When almost everything is editable, track time instead: for a minute after a user's last write, send that user's reads to the leader, and stop routing reads to any follower lagging by more than that.</li>
+    <li><strong>Remember the position of the last write.</strong> The client keeps the log position or timestamp of its most recent write and sends it with each read. A replica that has not reached that position waits, as the "Wait for my write position" fix in the figure does, or passes the read to another replica.</li>
+  </ul>
+  <p>Two practical wrinkles. If the same person uses a phone and a laptop, the last-write position has to live on the server, not in one device's memory. And if replicas span several data centres, all of that person's devices need to be routed to the same one.</p>
+
+  <h2>Monotonic reads</h2>
+  <p>In the second story, Tomas refreshes a page and the later refresh shows older data than the earlier one, because the two requests went to followers with different lag. Stale data is mildly annoying. Data that moves backwards is confusing, and it breaks any code that assumes what it has seen will not be undone.</p>
+  <p><strong>Monotonic reads</strong> promises that once a user has seen some value, they never later see an older one. The data may still be stale, so this is weaker than reading from the leader, but it is stronger than plain eventual consistency. The usual implementation is to send each user's reads to the same replica every time, for example by hashing the user ID instead of choosing at random. When that replica fails, the user has to be moved to another one, which should be at least as far along as the replica they were reading from.</p>
+
+  <h2>Consistent prefix reads</h2>
+  <p>The third story has no single slow replica to blame. In a partitioned database, each partition replicates on its own, with its own lag. Two writes, one caused by the other, can land in different partitions, and a reader can see the second without the first: an order for a product the catalogue does not contain yet. A sales report built from that read counts revenue for an item that does not exist.</p>
+  <p><strong>Consistent prefix reads</strong> promises that if writes happen in a certain order, anyone reading them sees them in that order: always some prefix of the history, never a history with a hole in the middle. A single replicated log gives you this for free, because a follower applies the log in order. The trouble appears only when causally related writes travel through different logs. The standard fixes are to put related writes in the same partition by choosing the partition key carefully, as the fix in the figure does with the product ID, or to track causal dependencies explicitly, an idea that returns in the lesson on concurrent writes.</p>
+
+  <h2>Living with lag</h2>
+  <p>When you build on asynchronous replication, ask what happens if the lag reaches a minute. If the answer is "nothing bad", leave it alone. If the answer involves a confused user or a wrong report, decide which of these guarantees you need and build it in on purpose. Treating asynchronous replication as if it were synchronous is how these bugs reach production.</p>
+  <p>Application-level workarounds like the ones above are subtle and easy to get wrong, especially when they have to cover many code paths. That is one reason databases offer stronger tools, such as transactions and linearizable reads, so application code does not need to reason about lag at all. Later chapters cover what those tools cost.</p>
+
+  <p class="book-ref">In the book: Chapter 5, "Problems with Replication Lag" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch5-lagviz.js"></script>
+</body>
+</html>

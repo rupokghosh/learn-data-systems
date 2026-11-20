@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leaderless replication and quorums · Learn Data Systems</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/ch5.css">
+</head>
+<body data-lesson="leaderless">
+<header class="topbar"></header>
+<div class="page">
+<nav class="toc"></nav>
+<article class="post">
+  <header class="post-head">
+    <h1>Leaderless replication and quorums</h1>
+  </header>
+
+  <p>Both designs so far funnel each write through a leader that decides the order of changes. A third family drops the leader entirely: any replica accepts writes, and the client, or a coordinator node acting for it, sends each write to several replicas directly. Amazon described this approach in its 2007 Dynamo paper, and Riak, Cassandra, and Voldemort followed it, which is why it is often called Dynamo-style replication.<span class="sidenote">Amazon's later DynamoDB service shares the name but, internally, uses leader-based replication per partition.</span></p>
+
+  <p>Without a leader there is no failover. If a replica is down, the write still goes to the others. The cost is that the replicas can disagree, and the system needs ways to notice and repair that.</p>
+
+  <h2>Writing to several replicas</h2>
+  <p>Each key is stored on <em>n</em> replicas. A write goes to all of them and counts as successful once <em>w</em> of them acknowledge it. A replica that was down at the time simply misses the write, and when it comes back it is stale. So reads also go to several replicas, and every value carries a version number; the client takes the newest version among the answers.</p>
+  <p>Two mechanisms bring stale replicas back up to date:</p>
+  <ul>
+    <li><strong>Read repair.</strong> When a read collects answers and notices that some replica returned an older version, the client writes the newer version back to it. Values that are read often get repaired quickly.</li>
+    <li><strong>Anti-entropy.</strong> A background process compares replicas and copies whatever is missing. It does not preserve any write order and may run slowly, but without it, values that are rarely read could stay stale on some replicas indefinitely. Cassandra and Riak compare replicas efficiently with Merkle trees, hashes over ranges of keys.</li>
+  </ul>
+
+  <h2>Quorums: w + r &gt; n</h2>
+  <p>If a write is acknowledged by <em>w</em> replicas, and a read waits for answers from <em>r</em> replicas, then as long as <em>w + r &gt; n</em> the two groups must overlap: there are not enough replicas for them to be disjoint. At least one replica the read hears from has the latest successful write. Reads and writes that obey this rule are called <strong>quorum</strong> reads and writes.</p>
+  <p>A common choice is an odd <em>n</em>, such as 3 or 5, with <em>w = r = (n + 1) / 2</em>. With <em>n = 3, w = r = 2</em>, one replica can be down and both reads and writes still work; with <em>n = 5, w = r = 3</em>, two can be. You can also skew it: <em>w = n, r = 1</em> makes reads fast and cheap, at the price that a single failed replica blocks every write. Cassandra exposes the choice per query, as consistency levels such as <code>ONE</code>, <code>QUORUM</code>, and <code>ALL</code>.</p>
+
+  <p>Try a sequence in the playground. With the defaults, fail R1, write, recover R1, and read a few times. Every read hears from at least one replica holding the newest version, and when R1 answers with an old one, read repair fixes it. Then set <em>w</em> and <em>r</em> to 1 and press Read right after Write: some reads now come back stale with no failure at all, because the one replica that answers first may not have received the write yet.</p>
+
+  <figure class="widget" id="quorum">
+    <p class="widget-title">Quorum playground</p>
+    <p class="widget-sub">Set n, w, and r. Click a replica to fail or recover it. Then write and read.</p>
+    <div class="controls">
+      <div class="control"><label for="q-n">Replicas, n <output></output></label><input id="q-n" type="range" min="1" max="7" step="1" value="3"></div>
+      <div class="control"><label for="q-w">Write acknowledgements, w <output></output></label><input id="q-w" type="range" min="1" max="3" step="1" value="2"></div>
+      <div class="control"><label for="q-r">Read answers, r <output></output></label><input id="q-r" type="range" min="1" max="3" step="1" value="2"></div>
+    </div>
+    <div class="ch5-rule"></div>
+    <div class="ch5-replicas"></div>
+    <div class="btn-row">
+      <button class="btn primary" data-act="write">Write</button>
+      <button class="btn primary" data-act="read">Read</button>
+      <button class="btn" data-act="ae">Run anti-entropy</button>
+      <label class="btn check"><input type="checkbox" id="q-sloppy"> Sloppy quorum</label>
+      <button class="btn" data-act="reset">Reset</button>
+    </div>
+    <div class="st"></div>
+    <div class="table-wrap" style="margin:10px 0 0"><table class="ch5-q" data-out="table"></table></div>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>write</span>
+      <span><i style="background:var(--green)"></i>acknowledgement</span>
+      <span><i style="background:var(--purple)"></i>read and answer</span>
+      <span><i style="background:var(--orange)"></i>repair, hint, or handoff</span>
+    </div>
+    <div class="verdict"></div>
+    <figcaption>Each message has its own random delay, so a different set of replicas answers first each time. Green cells mark replicas in both the last write's acknowledgements and the last read's answers. An asterisk means a stand-in is holding the value for another replica.</figcaption>
+  </figure>
+
+  <h2>What a quorum does not promise</h2>
+  <p>The overlap argument is tidy, but it rests on assumptions that real systems break regularly. Even with <em>w + r &gt; n</em>, a read can return an old value when:</p>
+  <ul>
+    <li><strong>A sloppy quorum is in use</strong> (below): the <em>w</em> acknowledgements may come from nodes outside the <em>n</em> that reads consult.</li>
+    <li><strong>Two writes are concurrent.</strong> The replicas may apply them in different orders, and if the system settles that by keeping the higher timestamp, one write disappears. The next lesson is about this case.</li>
+    <li><strong>A read overlaps a write.</strong> While a write is still in progress, some replicas have the new value and some do not, and a read may or may not see it.</li>
+    <li><strong>A write fails partway.</strong> If fewer than <em>w</em> replicas acknowledge, the client is told the write failed, yet the replicas that did store it keep it. You can see this in the playground: fail two of three replicas with <em>w = 2</em> and write.</li>
+    <li><strong>A replica is restored from an old copy.</strong> If a replica holding the newest value dies and is rebuilt from one with an older value, fewer than <em>w</em> replicas may now hold the newest one.</li>
+  </ul>
+  <p>So quorums make stale reads unlikely, not impossible. They are a tuning knob for probability and latency, not a guarantee in the sense of the stronger consistency models later in the book. Monitoring is harder too: a leader-based system can report how far each follower is behind in its log, but leaderless replicas share no log, so there is no simple lag number to alert on.</p>
+
+  <h2>Sloppy quorums and hinted handoff</h2>
+  <p>Now suppose a network problem cuts a client off from most of the <em>n</em> replicas for some key, while other nodes in the cluster remain reachable. The system can return errors for writes it cannot place on <em>w</em> of the key's home replicas, or it can accept them on any <em>w</em> reachable nodes, including ones that do not normally hold the key. The second option is a <strong>sloppy quorum</strong>. When the home replicas become reachable again, the stand-ins send them what they held, which is called <strong>hinted handoff</strong>.</p>
+  <p>Turn on Sloppy quorum in the playground, fail two replicas, and write. Stand-ins S1 and S2 accept the write on behalf of the failed ones, so it succeeds. Now recover the replicas, fail the third, and read straight away: the newest value may still be on its way, so the read can come back stale even though <em>w + r &gt; n</em>. A sloppy quorum improves write availability by giving up the overlap guarantee until handoff completes. It is an option in the common Dynamo-style databases: Riak has it on by default, while Cassandra and Voldemort ship with it off.</p>
+
+  <p class="book-ref">In the book: Chapter 5, "Leaderless Replication" (1st edition).</p>
+  <footer class="post-foot"></footer>
+</article>
+</div>
+<script type="module" src="/assets/site.js"></script>
+<script type="module" src="/assets/widgets/ch5-quorumviz.js"></script>
+</body>
+</html>
