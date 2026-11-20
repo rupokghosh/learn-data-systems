@@ -150,6 +150,8 @@ table.tradeoffs { width: 100%; border-collapse: collapse; font: 14px/1.5 var(--s
 .post-foot small { font-size: 12px; color: var(--ink-3); }
 .post-foot span { font: 17px/1.4 var(--serif); color: var(--ink); }
 .post-foot .next { text-align: right; margin-left: auto; }
+.site-note { font: 12px/1.6 var(--sans); color: var(--ink-3); margin: 4em 0 0; }
+.site-note a { color: inherit; text-underline-offset: 2px; }
 
 /* ---------- Home ---------- */
 .home { width: min(var(--col), calc(100% - 32px)); margin: 0 auto; padding: 40px 0 120px; }

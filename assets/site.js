@@ -1,5 +1,7 @@
 // Shared page chrome: top bar, outline (table of contents), previous/next links.
 
+const REPO = "https://github.com/rupokghosh/learn-data-systems";
+
 export const CHAPTERS = [
   {
     n: 1, part: "I", title: "Reliable, Scalable, and Maintainable Applications", sub: "What it means for a data system to work well, and how to measure it.",
@@ -211,8 +213,19 @@ function buildReadStatus() {
   paint();
 }
 
+// Shown at the bottom of every page: this site is a fan project, not an official one.
+function buildNotice() {
+  const host = document.querySelector(".post, main.home");
+  if (!host) return;
+  const note = document.createElement("p");
+  note.className = "site-note";
+  note.innerHTML = `An unofficial companion to <em>Designing Data-Intensive Applications</em>. Not affiliated with or endorsed by Martin Kleppmann or O'Reilly Media. Found a mistake? <a href="${REPO}/issues">Open an issue</a> or <a href="${REPO}">send a fix on GitHub</a>.`;
+  host.append(note);
+}
+
 buildTopbar();
 buildByline();
 buildToc();
 buildFooter();
 buildReadStatus();
+buildNotice();
