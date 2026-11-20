@@ -16,24 +16,6 @@ python3 -m http.server 4321
 
 Then open http://localhost:4321.
 
-## Layout
-
-```
-index.html          home page and chapter list
-lessons/            one HTML file per lesson
-assets/style.css    shared design system
-assets/site.js      chapter registry, top bar, outline, read tracking
-assets/charts.js    small helpers for charts and controls
-assets/widgets/     the interactive figures
-assets/engines/     the simulations behind them
-assets/chN.css      styles used by one chapter only
-video/              script that records the demo video
-```
-
-Reading progress is kept in your browser's `localStorage`. There is no backend.
-
-The `video/` script is optional. It needs Node 22, Google Chrome on macOS, and `npm install` inside `video/`; run `node make.mjs` while the site is being served.
-
 ## Contributing
 
 Found a bug, a typo, or an explanation that is wrong? Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
