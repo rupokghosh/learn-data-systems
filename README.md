@@ -2,6 +2,8 @@
 
 An interactive companion to [*Designing Data-Intensive Applications*](https://dataintensive.net) by Martin Kleppmann.
 
+**Live at [rupokghosh.com/designing-data-intensive-applications](https://www.rupokghosh.com/designing-data-intensive-applications)**
+
 Each lesson is one short page with something you can change and watch: split a B-tree page, partition a Raft cluster, crash a two-phase commit coordinator, let a celebrity post and see which timeline design falls over. It covers all 12 chapters of the first edition in 51 lessons.
 
 **This is an unofficial project.** It is not affiliated with or endorsed by Martin Kleppmann or O'Reilly Media. The ideas are the book's; the text, examples, and code here are written from scratch. It is a study aid, not a replacement. Read the book.
