@@ -8,7 +8,7 @@ Each lesson is one short page with something you can change and watch: split a B
 
 ## Run it locally
 
-There is no build step and there are no dependencies. The pages use root-absolute paths, so serve the folder from its root:
+There is no build step and there are no dependencies. Serve the folder with any static file server:
 
 ```bash
 python3 -m http.server 4321

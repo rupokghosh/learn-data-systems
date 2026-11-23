@@ -2,14 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<script>
+  // Relative links need a trailing slash on the home page URL; add a base when it is missing.
+  if (!/\/$|\.html$/.test(location.pathname)) document.write(`<base href="${location.pathname}/">`);
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Learn Data Systems</title>
 <meta name="description" content="An interactive companion to Designing Data-Intensive Applications.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/assets/style.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
 </head>
 <body data-page="home">
 <header class="topbar"></header>
@@ -25,7 +29,7 @@
   <div id="chapters"></div>
 </main>
 <script type="module">
-  import { PARTS, isRead } from "/assets/site.js";
+  import { PARTS, isRead } from "./assets/site.js";
   const chapterHtml = (c) => {
     if (!c.lessons.length) {
       return `<h3 class="index-chapter soon" id="chapter-${c.n}"><span>Chapter ${c.n} · ${c.title}</span><span class="read-count">Coming later</span></h3>`;
@@ -34,7 +38,7 @@
     return `
     <h3 class="index-chapter" id="chapter-${c.n}"><span>Chapter ${c.n} · ${c.title}</span>${read ? `<span class="read-count">${read} of ${c.lessons.length} read</span>` : ""}<small>${c.sub}</small></h3>
     <ol class="index">${c.lessons.map((l, i) => `
-      <li class="${isRead(l.slug) ? "read" : ""}"><a href="/lessons/${l.slug}.html"><span class="num">${c.n}.${i + 1}</span><span><span class="t">${l.title}</span><span class="d">${isRead(l.slug) ? `<span class="read-mark">Read</span>` : ""}${l.desc}</span></span></a></li>`).join("")}
+      <li class="${isRead(l.slug) ? "read" : ""}"><a href="lessons/${l.slug}.html"><span class="num">${c.n}.${i + 1}</span><span><span class="t">${l.title}</span><span class="d">${isRead(l.slug) ? `<span class="read-mark">Read</span>` : ""}${l.desc}</span></span></a></li>`).join("")}
     </ol>`;
   };
   const render = () => {
@@ -48,6 +52,6 @@
   // Coming back with the browser's back button can restore a cached page; refresh the marks.
   addEventListener("pageshow", render);
 </script>
-<script type="module" src="/assets/site.js"></script>
+<script type="module" src="assets/site.js"></script>
 </body>
 </html>

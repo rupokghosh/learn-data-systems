@@ -138,7 +138,10 @@ export function setRead(slug, value) {
   if (value) r[slug] = Date.now(); else delete r[slug];
   try { localStorage.setItem(READ_KEY, JSON.stringify(r)); } catch { /* storage unavailable: tracking is best effort */ }
 }
-const href = (slug) => `/lessons/${slug}.html`;
+// The site can live at a domain root or under a path (rupokghosh.com/…), so build
+// links from where this script was loaded rather than from "/".
+const ROOT = new URL("../", import.meta.url).pathname;
+const href = (slug) => `${ROOT}lessons/${slug}.html`;
 const currentSlug = document.body.dataset.lesson || null;
 const current = ALL.find((l) => l.slug === currentSlug);
 
@@ -146,8 +149,8 @@ function buildTopbar() {
   const bar = document.querySelector(".topbar");
   if (!bar) return;
   bar.innerHTML = `
-    <a class="wordmark" href="/"><svg viewBox="0 0 18 14" aria-hidden="true"><rect x="0" y="0" width="5" height="14" rx="1" style="fill:var(--ink-4)"/><rect x="6.5" y="0" width="5" height="14" rx="1" style="fill:var(--ink-3)"/><rect x="13" y="0" width="5" height="14" rx="1" style="fill:var(--accent)"/></svg>Learn Data Systems</a>
-    <nav class="topnav"><a href="/">Chapters</a><a href="https://dataintensive.net" target="_blank" rel="noopener">The book</a></nav>`;
+    <a class="wordmark" href="${ROOT}"><svg viewBox="0 0 18 14" aria-hidden="true"><rect x="0" y="0" width="5" height="14" rx="1" style="fill:var(--ink-4)"/><rect x="6.5" y="0" width="5" height="14" rx="1" style="fill:var(--ink-3)"/><rect x="13" y="0" width="5" height="14" rx="1" style="fill:var(--accent)"/></svg>Learn Data Systems</a>
+    <nav class="topnav"><a href="${ROOT}">Chapters</a><a href="https://dataintensive.net" target="_blank" rel="noopener">The book</a></nav>`;
 }
 
 function buildByline() {
@@ -192,7 +195,7 @@ function buildFooter() {
   const i = ALL.indexOf(current);
   const prev = ALL[i - 1], next = ALL[i + 1];
   foot.innerHTML = `
-    ${prev ? `<a href="${href(prev.slug)}"><small>Previous</small><span>${prev.title}</span></a>` : `<a href="/"><small>Back to</small><span>All chapters</span></a>`}
+    ${prev ? `<a href="${href(prev.slug)}"><small>Previous</small><span>${prev.title}</span></a>` : `<a href="${ROOT}"><small>Back to</small><span>All chapters</span></a>`}
     ${next ? `<a class="next" href="${href(next.slug)}"><small>Next${next.chapter !== current.chapter ? ` · Chapter ${next.chapter.n}` : ""}</small><span>${next.title}</span></a>` : ""}`;
 }
 
