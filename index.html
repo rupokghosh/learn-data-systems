@@ -2,18 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<script>
-  // Relative links need a trailing slash on the home page URL; add a base when it is missing.
-  if (!/\/$|\.html$/.test(location.pathname)) document.write(`<base href="${location.pathname}/">`);
-</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Learn Data Systems</title>
 <meta name="description" content="An interactive companion to Designing Data-Intensive Applications.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
-<link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="assets/style.css">
+<script>
+  // This page can be opened as ".../designing-data-intensive-applications" with no
+  // trailing slash, where relative URLs would resolve one level too high. Add a base
+  // first, then write the page's own files so they always load from the right place.
+  if (!/\/$|\.html$/.test(location.pathname)) document.write(`<base href="${location.pathname}/">`);
+  document.write('<link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="assets/style.css">');
+</script>
 </head>
 <body data-page="home">
 <header class="topbar"></header>
@@ -52,6 +53,5 @@
   // Coming back with the browser's back button can restore a cached page; refresh the marks.
   addEventListener("pageshow", render);
 </script>
-<script type="module" src="assets/site.js"></script>
 </body>
 </html>
