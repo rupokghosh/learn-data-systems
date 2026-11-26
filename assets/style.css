@@ -250,8 +250,25 @@ pre.code { margin: 0 0 14px; }
   .post-foot a:hover span { text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 30%, transparent); text-underline-offset: 3px; }
 }
 
+/* ---------- Phones and touch screens ---------- */
+/* Diagrams that scroll sideways run to the screen edge, fade where they are cut off,
+   and say so until the reader has swiped once. */
+.scroll-x.can-scroll::after { content: "Swipe sideways to see the whole diagram"; position: sticky; left: 0; display: block; width: max-content; margin-top: 6px; font: 12px/1.4 var(--sans); color: var(--ink-3); }
+.scroll-x.can-scroll.swiped::after { content: none; }
+.scroll-x.can-scroll:not(.at-end) { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); }
+@media (pointer: coarse) {
+  /* Finger-sized controls. Inputs at 16px also stop iOS from zooming in on focus. */
+  figure.widget .btn { height: 36px; }
+  figure.widget .btn.sm, figure.widget .c11-chip .btn, figure.widget .srv .btn, figure.widget .tx-col .btn { height: 34px; }
+  figure.widget select, figure.widget input[type="text"], figure.widget input[type="number"] { height: 36px; font-size: 16px; }
+  input[type="range"] { height: 28px; }
+  .link-btn { padding: 6px 0; }
+  .topnav a { padding: 6px 0; }
+}
+
 @media (max-width: 700px) {
   body { font-size: 16.5px; }
+  .scroll-x.can-scroll { margin-inline: -16px; padding-inline: 16px; }
   .course-progress { padding: 16px 16px 2px; }
   .read-row { flex-wrap: wrap; }
   .post { padding-top: 24px; }

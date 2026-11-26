@@ -264,6 +264,24 @@ function buildReadingBar() {
   update();
 }
 
+// Wide diagrams keep a minimum width so their labels stay readable, which means on a
+// phone they scroll sideways. Mark the ones that do, so CSS can fade the cut edge and
+// show a hint, and drop the hint once the reader has swiped.
+function markScrollers() {
+  const boxes = document.querySelectorAll(".scroll-x");
+  if (!boxes.length) return;
+  const check = (el) => {
+    const more = el.scrollWidth - el.clientWidth > 4;
+    el.classList.toggle("can-scroll", more);
+    el.classList.toggle("at-end", !more || el.scrollLeft + el.clientWidth >= el.scrollWidth - 4);
+  };
+  const ro = new ResizeObserver((entries) => entries.forEach((e) => check(e.target)));
+  boxes.forEach((el) => {
+    ro.observe(el);
+    el.addEventListener("scroll", () => { check(el); if (el.scrollLeft > 8) el.classList.add("swiped"); }, { passive: true });
+  });
+}
+
 // Shown at the bottom of every page: this site is a fan project, not an official one.
 function buildNotice() {
   const host = document.querySelector(".post, main.home");
@@ -280,4 +298,5 @@ buildToc();
 buildFooter();
 buildReadStatus();
 buildReadingBar();
+markScrollers();
 buildNotice();
