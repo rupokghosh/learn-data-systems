@@ -138,6 +138,16 @@ export function setRead(slug, value) {
   if (value) r[slug] = Date.now(); else delete r[slug];
   try { localStorage.setItem(READ_KEY, JSON.stringify(r)); } catch { /* storage unavailable: tracking is best effort */ }
 }
+// How much of a list of lessons has been read: { read, total, pct }. Defaults to the whole course.
+export function progress(lessons = ALL) {
+  const read = lessons.filter((l) => isRead(l.slug)).length;
+  const total = lessons.length;
+  return { read, total, pct: total ? Math.round((read / total) * 100) : 0 };
+}
+// A thin bar and a label, used on the home page and at the end of each lesson.
+export function progressBar(pct, label) {
+  return `<span class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="${label}"><span style="width:${pct}%"></span></span>`;
+}
 // The site can live at a domain root or under a path (rupokghosh.com/…), so build
 // links from where this script was loaded rather than from "/".
 const ROOT = new URL("../", import.meta.url).pathname;
@@ -207,9 +217,17 @@ function buildReadStatus() {
   foot.before(row);
   const paint = () => {
     const read = isRead(current.slug);
-    row.innerHTML = read
-      ? `<span class="is-read">You have read this lesson</span><button class="link-btn" data-unread>Mark as unread</button>`
-      : `<span>Reach the end to mark this lesson as read</span><button class="link-btn" data-read>Mark as read</button>`;
+    const all = progress();
+    const ch = progress(current.chapter.lessons);
+    row.innerHTML = `
+      <div class="read-row">${read
+        ? `<span class="is-read">You have read this lesson</span><button class="link-btn" data-unread>Mark as unread</button>`
+        : `<span>Reach the end to mark this lesson as read</span><button class="link-btn" data-read>Mark as read</button>`}</div>
+      <div class="read-progress">
+        <span class="read-progress-label"><a href="${ROOT}#chapters">Course progress</a><b>${all.pct}%</b></span>
+        ${progressBar(all.pct, "Course progress")}
+        <span class="read-progress-sub">${all.read} of ${all.total} lessons read · Chapter ${current.chapter.n}: ${ch.read} of ${ch.total}</span>
+      </div>`;
   };
   row.addEventListener("click", (e) => {
     if (e.target.matches("[data-unread]")) { setRead(current.slug, false); manual = true; paint(); }
@@ -222,6 +240,28 @@ function buildReadStatus() {
     if (entries.some((en) => en.isIntersecting) && !manual && !isRead(current.slug)) { setRead(current.slug, true); paint(); }
   }, { rootMargin: "0px 0px -10% 0px" }).observe(row);
   paint();
+}
+
+// A thin bar along the top of a lesson that fills as you scroll through it.
+function buildReadingBar() {
+  const post = document.querySelector(".post");
+  if (!post || !current) return;
+  const bar = document.createElement("div");
+  bar.className = "reading-bar";
+  bar.setAttribute("aria-hidden", "true");
+  document.body.prepend(bar);
+  let queued = false;
+  const update = () => {
+    queued = false;
+    const top = post.getBoundingClientRect().top + scrollY;
+    const span = Math.max(1, post.offsetHeight - innerHeight);
+    const f = Math.min(1, Math.max(0, (scrollY - top) / span));
+    bar.style.transform = `scaleX(${f})`;
+  };
+  const queue = () => { if (!queued) { queued = true; requestAnimationFrame(update); } };
+  addEventListener("scroll", queue, { passive: true });
+  addEventListener("resize", queue);
+  update();
 }
 
 // Shown at the bottom of every page: this site is a fan project, not an official one.
@@ -239,4 +279,5 @@ buildByline();
 buildToc();
 buildFooter();
 buildReadStatus();
+buildReadingBar();
 buildNotice();

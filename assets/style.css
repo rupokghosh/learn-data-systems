@@ -176,12 +176,30 @@ table.tradeoffs { width: 100%; border-collapse: collapse; font: 14px/1.5 var(--s
 .index li.read .t { color: var(--ink-3); }
 .read-mark { color: var(--green); margin-right: 8px; }
 .read-mark::before { content: "✓ "; }
-.read-status { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 3em; font: 13px/1.5 var(--sans); color: var(--ink-3); }
+.read-status { margin-top: 3em; font: 13px/1.5 var(--sans); color: var(--ink-3); }
 .read-status + .post-foot { margin-top: 12px; }
 .read-status .is-read { color: var(--green); }
 .read-status .is-read::before { content: "✓ "; }
 .link-btn { border: 0; background: none; padding: 0; font: 13px/1.5 var(--sans); color: var(--ink-3); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 30%, transparent); text-underline-offset: 3px; cursor: pointer; }
 .toc .read-note { font-size: 12px; color: var(--green); margin-top: 18px; }
+.read-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+
+/* ---------- Progress ---------- */
+.progress-bar { display: block; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.progress-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--green); transition: width 400ms var(--ease-out); }
+.course-progress { margin: 3em 0 0; padding: 18px 20px 4px; border: 1px solid var(--line); border-radius: 10px; font-family: var(--sans); }
+.course-progress-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; font-size: 13px; color: var(--ink-3); }
+.course-progress-head b { font: 500 22px/1 var(--sans); color: var(--ink); font-variant-numeric: tabular-nums; }
+.course-progress p { font: 13px/1.5 var(--sans); color: var(--ink-3); margin: 10px 0 14px; }
+.course-progress + .index-part { margin-top: 3em; }
+.index-part-title em { font-style: normal; letter-spacing: 0; text-transform: none; color: var(--green); margin-left: 10px; font-variant-numeric: tabular-nums; }
+.read-count.done { color: var(--green); }
+.read-progress { margin-top: 14px; padding: 14px 0 2px; border-top: 1px solid var(--line); }
+.read-progress-label { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.read-progress-label a { color: var(--ink-3); }
+.read-progress-label b { font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+.read-progress-sub { display: block; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.reading-bar { position: fixed; top: 0; left: 0; right: 0; height: 2px; background: var(--accent); transform: scaleX(0); transform-origin: 0 50%; z-index: 50; pointer-events: none; }
 
 /* ---------- Diagram nodes (SVG) ---------- */
 .dg-node rect { fill: var(--bg); stroke: var(--line-2); stroke-width: 1; transition: fill 200ms ease, stroke 200ms ease; }
@@ -234,6 +252,8 @@ pre.code { margin: 0 0 14px; }
 
 @media (max-width: 700px) {
   body { font-size: 16.5px; }
+  .course-progress { padding: 16px 16px 2px; }
+  .read-row { flex-wrap: wrap; }
   .post { padding-top: 24px; }
   .post-head { margin: 0 0 40px; }
   .post-head h1 { font-size: 26px; }
