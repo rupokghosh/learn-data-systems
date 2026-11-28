@@ -65,8 +65,10 @@ button { font: inherit; color: inherit; }
 .topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 24px; font-family: var(--sans); }
 .wordmark { display: inline-flex; align-items: center; gap: 9px; font: 500 14px/1 var(--sans); color: var(--ink); text-decoration: none; white-space: nowrap; }
 .wordmark svg { width: 18px; height: 14px; flex: none; }
-.topnav { display: flex; gap: 22px; font-size: 14px; }
+.topnav { display: flex; align-items: center; gap: 22px; font-size: 14px; }
 .topnav a { color: var(--ink-2); text-decoration: none; }
+.fs-btn { display: inline-flex; align-items: center; gap: 7px; border: 0; background: none; padding: 0; font: 14px/1.6 var(--sans); color: var(--ink-2); cursor: pointer; }
+.fs-btn svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ---------- Article layout ---------- */
 .page { display: grid; grid-template-columns: minmax(0, 1fr) min(var(--col), calc(100% - 32px)) minmax(0, 1fr); column-gap: 0; }
@@ -239,7 +241,7 @@ pre.code { margin: 0 0 14px; }
 /* ---------- Hover only where a real pointer exists ---------- */
 @media (hover: hover) and (pointer: fine) {
   a:hover { text-decoration-color: currentColor; }
-  .topnav a:hover, .toc a:hover { color: var(--ink); }
+  .topnav a:hover, .fs-btn:hover, .toc a:hover { color: var(--ink); }
   .btn:not(:disabled):not(.primary):not([aria-pressed="true"]):hover { border-color: var(--ink-3); color: var(--ink); }
   .index a:hover .t { text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 30%, transparent); text-underline-offset: 3px; }
   .post-foot a:hover span { text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 30%, transparent); text-underline-offset: 3px; }

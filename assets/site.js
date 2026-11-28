@@ -161,6 +161,37 @@ function buildTopbar() {
   bar.innerHTML = `
     <a class="wordmark" href="${ROOT}"><svg viewBox="0 0 18 14" aria-hidden="true"><rect x="0" y="0" width="5" height="14" rx="1" style="fill:var(--ink-4)"/><rect x="6.5" y="0" width="5" height="14" rx="1" style="fill:var(--ink-3)"/><rect x="13" y="0" width="5" height="14" rx="1" style="fill:var(--accent)"/></svg>Learn Data Systems</a>
     <nav class="topnav"><a href="${ROOT}">Chapters</a><a href="https://dataintensive.net" target="_blank" rel="noopener">The book</a></nav>`;
+  buildFullscreen(bar.querySelector(".topnav"));
+}
+
+// A full-screen toggle for desktop browsers. Phones already give the page the whole
+// screen, and most of them do not support it for a whole page anyway.
+function buildFullscreen(nav) {
+  const root = document.documentElement;
+  const enter = root.requestFullscreen || root.webkitRequestFullscreen;
+  const exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if (!nav || !enter || !(document.fullscreenEnabled ?? document.webkitFullscreenEnabled)) return;
+  if (!matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+  const active = () => document.fullscreenElement || document.webkitFullscreenElement;
+  const btn = document.createElement("button");
+  btn.className = "fs-btn";
+  btn.type = "button";
+  const paint = () => {
+    const on = !!active();
+    btn.setAttribute("aria-pressed", on);
+    btn.title = on ? "Leave full screen (Esc)" : "Read in full screen";
+    btn.innerHTML = `<svg viewBox="0 0 14 14" aria-hidden="true"><path d="${on
+      ? "M5 1v4H1M9 1v4h4M5 13V9H1M9 13V9h4"
+      : "M1 5V1h4M13 5V1H9M1 9v4h4M13 9v4H9"}"/></svg>${on ? "Exit full screen" : "Full screen"}`;
+  };
+  btn.addEventListener("click", () => {
+    const r = active() ? exit.call(document) : enter.call(root);
+    if (r && r.catch) r.catch(() => {}); // refused (for example inside a frame): leave the page as it is
+  });
+  document.addEventListener("fullscreenchange", paint);
+  document.addEventListener("webkitfullscreenchange", paint);
+  paint();
+  nav.append(btn);
 }
 
 function buildByline() {
