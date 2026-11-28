@@ -187,11 +187,6 @@ table.tradeoffs { width: 100%; border-collapse: collapse; font: 14px/1.5 var(--s
 /* ---------- Progress ---------- */
 .progress-bar { display: block; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .progress-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--green); transition: width 400ms var(--ease-out); }
-.course-progress { margin: 3em 0 0; padding: 18px 20px 4px; border: 1px solid var(--line); border-radius: 10px; font-family: var(--sans); }
-.course-progress-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; font-size: 13px; color: var(--ink-3); }
-.course-progress-head b { font: 500 22px/1 var(--sans); color: var(--ink); font-variant-numeric: tabular-nums; }
-.course-progress p { font: 13px/1.5 var(--sans); color: var(--ink-3); margin: 10px 0 14px; }
-.course-progress + .index-part { margin-top: 3em; }
 .index-part-title em { font-style: normal; letter-spacing: 0; text-transform: none; color: var(--green); margin-left: 10px; font-variant-numeric: tabular-nums; }
 .read-count.done { color: var(--green); }
 .read-progress { margin-top: 14px; padding: 14px 0 2px; border-top: 1px solid var(--line); }
@@ -269,7 +264,6 @@ pre.code { margin: 0 0 14px; }
 @media (max-width: 700px) {
   body { font-size: 16.5px; }
   .scroll-x.can-scroll { margin-inline: -16px; padding-inline: 16px; }
-  .course-progress { padding: 16px 16px 2px; }
   .read-row { flex-wrap: wrap; }
   .post { padding-top: 24px; }
   .post-head { margin: 0 0 40px; }

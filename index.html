@@ -30,7 +30,7 @@
   <div id="chapters"></div>
 </main>
 <script type="module">
-  import { PARTS, isRead, progress, progressBar } from "./assets/site.js";
+  import { PARTS, isRead, progress } from "./assets/site.js";
   const chapterHtml = (c) => {
     if (!c.lessons.length) {
       return `<h3 class="index-chapter soon" id="chapter-${c.n}"><span>Chapter ${c.n} · ${c.title}</span><span class="read-count">Coming later</span></h3>`;
@@ -42,19 +42,8 @@
       <li class="${isRead(l.slug) ? "read" : ""}"><a href="lessons/${l.slug}.html"><span class="num">${c.n}.${i + 1}</span><span><span class="t">${l.title}</span><span class="d">${isRead(l.slug) ? `<span class="read-mark">Read</span>` : ""}${l.desc}</span></span></a></li>`).join("")}
     </ol>`;
   };
-  const overall = () => {
-    const { read, total, pct } = progress();
-    return `
-    <div class="course-progress">
-      <div class="course-progress-head"><span>Your progress</span><b>${pct}%</b></div>
-      ${progressBar(pct, "Course progress")}
-      <p>${read
-        ? `${read} of ${total} lessons read${read === total ? ". You have finished every lesson." : "."}`
-        : `${total} lessons. A lesson counts as read when you reach its end.`} Progress is saved in this browser only.</p>
-    </div>`;
-  };
   const render = () => {
-    document.getElementById("chapters").innerHTML = overall() + PARTS.map((p) => {
+    document.getElementById("chapters").innerHTML = PARTS.map((p) => {
       const pp = progress(p.chapters.flatMap((c) => c.lessons));
       return `
     <section class="index-part" id="part-${p.n}">
